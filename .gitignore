@@ -1,0 +1,90 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors and IDEs
+.idea/
+.vscode/
+*.code-workspace
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.python-version
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.venv/
+venv/
+env/
+ENV/
+dist/
+build/
+*.egg-info/
+
+# Go
+bin/
+pkg/
+*.test
+coverage.out
+
+# Terraform
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# dbt
+dbt_packages/
+target/
+logs/
+
+# Airflow
+airflow/logs/
+airflow/plugins/__pycache__/
+airflow/airflow.db
+airflow/standalone_admin_password.txt
+airflow/webserver_config.py
+
+# Docker
+*.pid
+docker-data/
+
+# Data outputs
+data/raw/*
+!data/raw/README.md
+data/processed/*
+!data/processed/README.md
+data/samples/*
+!data/samples/README.md
+
+# Logs
+*.log
+logs/
+
+# Secrets and local env files
+.env
+.env.local
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+secrets/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Test artifacts
+.cache/
+coverage/

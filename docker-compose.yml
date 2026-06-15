@@ -1,0 +1,4 @@
+version: "3.9"
+
+# Stage 0 only. Services start in Stage 1.
+services: {}
