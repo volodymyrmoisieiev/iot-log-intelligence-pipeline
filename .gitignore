@@ -62,11 +62,16 @@ docker-data/
 
 # Data outputs
 data/raw/*
+data/raw/*.csv
+data/raw/*.json
+data/raw/*.parquet
+data/raw/*.zip
 !data/raw/README.md
 data/processed/*
 !data/processed/README.md
 data/samples/*
 !data/samples/README.md
+!data/samples/sample_iot_logs.csv
 
 # Logs
 *.log
