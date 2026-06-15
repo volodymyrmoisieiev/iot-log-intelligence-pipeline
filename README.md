@@ -4,7 +4,7 @@
 
 IoT Log Intelligence Pipeline is a portfolio project focused on end-to-end data engineering for IoT logs: ingestion, processing, storage, transformation, and analytics.
 
-The repository is currently at Stage 0, so it contains structure, documentation, and config scaffolding only.
+The repository is currently at Stage 1, with a working local Kafka development stack for the streaming layer.
 
 ## 2. Planned local architecture
 
@@ -110,16 +110,37 @@ iot-log-intelligence-pipeline/
 - Stage 9: AWS + Terraform
 - Stage 10: CI/CD + final docs
 
-## 7. Security note
+## 7. Stage 1 local setup
+
+Stage 1 brings up Kafka locally with Docker Compose, exposes Kafka UI at [http://localhost:8080](http://localhost:8080/), and creates the required topics automatically for future pipeline stages.
+
+Run the local stack:
+
+```bash
+docker compose config
+docker compose up -d
+docker compose ps
+docker compose logs kafka
+docker compose down
+```
+
+Stage 1 scope:
+
+- Kafka runs locally for development.
+- Kafka UI is available at [http://localhost:8080](http://localhost:8080/).
+- Topics are created automatically: `iot_raw_logs`, `iot_processed_logs`, `iot_invalid_logs`, and `iot_pipeline_alerts`.
+- This stage prepares the streaming layer for the future Go producer and Python consumer.
+
+## 8. Security note
 
 Do not commit real credentials, production secrets, or sensitive data. Use environment variables and secret management outside the repository.
 
 ## Current stage
 
-Stage 0 includes only:
+Stage 1 includes:
 
-- repository skeleton
-- documentation
-- configuration scaffolding
+- repository skeleton and documentation
+- local Docker Compose services for Kafka, Kafka topic initialization, and Kafka UI
+- safe local environment placeholders
 
-No pipeline logic, runnable services, or infrastructure code has been added yet.
+Go producer logic, Python consumer logic, business logic, orchestration, analytics, and cloud runtime components will be added in later stages.
