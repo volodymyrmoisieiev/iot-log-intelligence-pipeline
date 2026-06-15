@@ -4,7 +4,7 @@
 
 IoT Log Intelligence Pipeline is a portfolio project focused on end-to-end data engineering for IoT logs: ingestion, processing, storage, transformation, and analytics.
 
-The repository is currently at Stage 1, with a working local Kafka development stack for the streaming layer.
+The repository is currently at Stage 3, with a working local Kafka stack, a Go producer, and a Python consumer validation layer.
 
 ## 2. Planned local architecture
 
@@ -153,17 +153,46 @@ How to use this stage:
 - Open Kafka UI at [http://localhost:8080](http://localhost:8080/) to inspect the `iot_raw_logs` topic and message flow.
 - Stop the full local stack with `docker compose down`.
 
-## 9. Security note
+## 9. Stage 3 Python consumer
+
+Stage 3 adds a Python consumer that reads JSON messages from `iot_raw_logs`, validates required fields and data types, normalizes valid records, adds `processed_at`, and routes records to:
+
+- `iot_processed_logs` for valid messages
+- `iot_invalid_logs` for invalid messages with `raw_payload`, `error_reason`, and `failed_at`
+
+Run Stage 3 locally:
+
+```bash
+docker compose config
+docker compose up -d kafka kafka-ui kafka-init
+docker compose run --build --rm go-producer
+docker compose run --build --rm python-consumer
+docker exec iot-kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic iot_processed_logs --from-beginning --max-messages 5
+docker exec iot-kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic iot_invalid_logs --from-beginning --max-messages 5
+docker compose down
+```
+
+How to use this stage:
+
+- Start Kafka and topic initialization with `docker compose up -d kafka kafka-ui kafka-init`.
+- Run the Go producer on demand with `docker compose run --build --rm go-producer`.
+- Run the Python consumer on demand with `docker compose run --build --rm python-consumer`.
+- Inspect valid output in `iot_processed_logs`.
+- Inspect invalid output in `iot_invalid_logs`.
+- Use Kafka UI at [http://localhost:8080](http://localhost:8080/) to review topic contents.
+
+## 10. Security note
 
 Do not commit real credentials, production secrets, or sensitive data. Use environment variables and secret management outside the repository.
 
 ## Current stage
 
-Stage 2 includes:
+Stage 3 includes:
 
 - repository skeleton and documentation
 - local Docker Compose services for Kafka, Kafka topic initialization, and Kafka UI
 - a Go producer that reads sample CSV data and publishes JSON messages to Kafka
+- a Python consumer that validates and routes records to processed and invalid Kafka topics
 - safe local environment placeholders
 
-Python consumer logic, business logic, orchestration, analytics, and cloud runtime components will be added in later stages.
+Storage, dbt, Airflow, Spark, AWS, Terraform, and analytics layers are intentionally not implemented yet and will be added in later stages.
