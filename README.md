@@ -131,16 +131,39 @@ Stage 1 scope:
 - Topics are created automatically: `iot_raw_logs`, `iot_processed_logs`, `iot_invalid_logs`, and `iot_pipeline_alerts`.
 - This stage prepares the streaming layer for the future Go producer and Python consumer.
 
-## 8. Security note
+## 8. Stage 2 Go producer
+
+Stage 2 adds a simple Go producer that reads `data/samples/sample_iot_logs.csv`, converts each row into JSON, appends `ingestion_timestamp`, and publishes to Kafka topic `iot_raw_logs`.
+
+Run Stage 2 locally:
+
+```bash
+docker compose config
+docker compose up -d kafka kafka-ui kafka-init
+docker compose run --rm go-producer
+docker exec iot-kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic iot_raw_logs --from-beginning --max-messages 5
+docker compose down
+```
+
+How to use this stage:
+
+- Start Kafka and topic initialization with `docker compose up -d kafka kafka-ui kafka-init`.
+- Run the producer on demand with `docker compose run --rm go-producer`.
+- Verify published messages with the Kafka console consumer command above.
+- Open Kafka UI at [http://localhost:8080](http://localhost:8080/) to inspect the `iot_raw_logs` topic and message flow.
+- Stop the full local stack with `docker compose down`.
+
+## 9. Security note
 
 Do not commit real credentials, production secrets, or sensitive data. Use environment variables and secret management outside the repository.
 
 ## Current stage
 
-Stage 1 includes:
+Stage 2 includes:
 
 - repository skeleton and documentation
 - local Docker Compose services for Kafka, Kafka topic initialization, and Kafka UI
+- a Go producer that reads sample CSV data and publishes JSON messages to Kafka
 - safe local environment placeholders
 
-Go producer logic, Python consumer logic, business logic, orchestration, analytics, and cloud runtime components will be added in later stages.
+Python consumer logic, business logic, orchestration, analytics, and cloud runtime components will be added in later stages.
