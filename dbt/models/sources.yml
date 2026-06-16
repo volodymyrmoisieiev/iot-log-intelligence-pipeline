@@ -1,0 +1,11 @@
+version: 2
+
+sources:
+  - name: warehouse
+    description: Raw warehouse tables loaded from Kafka by the warehouse-loader service.
+    schema: public
+    tables:
+      - name: processed_iot_logs
+        description: Valid IoT log records stored in PostgreSQL.
+      - name: invalid_iot_logs
+        description: Invalid IoT log records stored in PostgreSQL.

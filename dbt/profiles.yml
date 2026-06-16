@@ -1,0 +1,13 @@
+analytics:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: "{{ env_var('POSTGRES_HOST', 'postgres') }}"
+      port: "{{ env_var('POSTGRES_PORT', '5432') | int }}"
+      user: "{{ env_var('POSTGRES_USER', 'iot_user') }}"
+      password: "{{ env_var('POSTGRES_PASSWORD', 'iot_password') }}"
+      dbname: "{{ env_var('POSTGRES_DB', 'iot_logs') }}"
+      schema: public
+      threads: 4
+      connect_timeout: 10
