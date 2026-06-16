@@ -1,4 +1,27 @@
 services:
+  postgres:
+    image: postgres:16
+    container_name: iot-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-iot_logs}
+      POSTGRES_USER: ${POSTGRES_USER:-iot_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-iot_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./storage/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
   kafka:
     image: apache/kafka:4.1.0
     container_name: iot-kafka
@@ -98,3 +121,31 @@ services:
       CONSUMER_IDLE_TIMEOUT_SECONDS: ${CONSUMER_IDLE_TIMEOUT_SECONDS:-10}
     profiles:
       - consumer
+
+  warehouse-loader:
+    build:
+      context: ./warehouse-loader
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_INTERNAL_BOOTSTRAP_SERVERS:-kafka:9092}
+      KAFKA_PROCESSED_TOPIC: ${KAFKA_PROCESSED_TOPIC:-iot_processed_logs}
+      KAFKA_INVALID_TOPIC: ${KAFKA_INVALID_TOPIC:-iot_invalid_logs}
+      POSTGRES_DB: ${POSTGRES_DB:-iot_logs}
+      POSTGRES_USER: ${POSTGRES_USER:-iot_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-iot_password}
+      POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      WAREHOUSE_LOADER_GROUP_ID: ${WAREHOUSE_LOADER_GROUP_ID:-iot-warehouse-loader}
+      WAREHOUSE_LOADER_MAX_MESSAGES: ${WAREHOUSE_LOADER_MAX_MESSAGES:-0}
+      WAREHOUSE_LOADER_IDLE_TIMEOUT_SECONDS: ${WAREHOUSE_LOADER_IDLE_TIMEOUT_SECONDS:-10}
+    profiles:
+      - storage
+
+volumes:
+  postgres_data:
