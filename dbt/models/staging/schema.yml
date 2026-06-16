@@ -1,0 +1,86 @@
+version: 2
+
+models:
+  - name: stg_processed_iot_logs
+    description: Clean staging model for valid IoT logs loaded into PostgreSQL.
+    columns:
+      - name: id
+        description: Surrogate key from the processed_iot_logs source table.
+        tests:
+          - not_null
+          - unique
+      - name: event_timestamp
+        tests:
+          - not_null
+      - name: event_date
+        tests:
+          - not_null
+      - name: event_hour
+        tests:
+          - not_null
+      - name: device_id
+        tests:
+          - not_null
+      - name: source_ip
+        tests:
+          - not_null
+      - name: destination_ip
+        tests:
+          - not_null
+      - name: protocol
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['TCP', 'UDP', 'ICMP']
+      - name: packet_size
+        tests:
+          - not_null
+      - name: duration_ms
+        tests:
+          - not_null
+      - name: event_type
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['normal', 'warning', 'error', 'attack']
+      - name: status
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['success', 'failed', 'blocked']
+      - name: processed_at
+        tests:
+          - not_null
+      - name: inserted_at
+        tests:
+          - not_null
+      - name: is_attack
+        tests:
+          - not_null
+      - name: is_failed
+        tests:
+          - not_null
+
+  - name: stg_invalid_iot_logs
+    description: Clean staging model for invalid IoT logs loaded into PostgreSQL.
+    columns:
+      - name: id
+        description: Surrogate key from the invalid_iot_logs source table.
+        tests:
+          - not_null
+          - unique
+      - name: raw_payload
+        tests:
+          - not_null
+      - name: error_reason
+        tests:
+          - not_null
+      - name: failed_at
+        tests:
+          - not_null
+      - name: inserted_at
+        tests:
+          - not_null

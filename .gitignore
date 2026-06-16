@@ -48,6 +48,7 @@ override.tf.json
 dbt_packages/
 target/
 logs/
+dbt/.user.yml
 
 # Airflow
 airflow/logs/
