@@ -4,12 +4,12 @@
 
 IoT Log Intelligence Pipeline is a portfolio project focused on end-to-end data engineering for IoT logs: ingestion, processing, storage, transformation, and analytics.
 
-The repository is currently at Stage 3, with a working local Kafka stack, a Go producer, and a Python consumer validation layer.
+The repository is currently at Stage 4B, with a working local Kafka stack, a Go producer, a Python consumer validation layer, a local PostgreSQL warehouse foundation, and a warehouse loader service.
 
 ## 2. Planned local architecture
 
 ```text
-Raw logs -> Go Producer -> Kafka -> Python Consumer -> warehouse/data lake -> dbt -> Streamlit dashboard
+Raw logs -> Go Producer -> Kafka -> Python Consumer -> Kafka processed/invalid topics -> warehouse loader -> PostgreSQL -> dbt -> Streamlit dashboard
 ```
 
 Local MVP focus:
@@ -88,8 +88,10 @@ iot-log-intelligence-pipeline/
 |       `-- prod/
 |-- python-consumer/
 |-- spark/
+|-- storage/postgres/init/
 |-- sql/
 |-- tests/
+|-- warehouse-loader/
 |-- .env.example
 |-- .gitignore
 |-- docker-compose.yml
@@ -181,18 +183,85 @@ How to use this stage:
 - Inspect invalid output in `iot_invalid_logs`.
 - Use Kafka UI at [http://localhost:8080](http://localhost:8080/) to review topic contents.
 
-## 10. Security note
+## 10. Stage 4A PostgreSQL foundation
+
+Stage 4A adds a local PostgreSQL warehouse foundation for future storage and analytics stages. At this point, the repository only provisions the database container and initializes the base tables automatically. No warehouse loader, dbt, Airflow, Spark, AWS, or Terraform execution logic is introduced in this stage.
+
+Run Stage 4A locally:
+
+```bash
+docker compose config
+docker compose up -d postgres
+docker exec -it iot-postgres psql -U iot_user -d iot_logs -c "\dt"
+docker exec -it iot-postgres psql -U iot_user -d iot_logs -c "SELECT COUNT(*) FROM processed_iot_logs;"
+docker exec -it iot-postgres psql -U iot_user -d iot_logs -c "SELECT COUNT(*) FROM invalid_iot_logs;"
+docker compose down
+```
+
+What this stage provides:
+
+- a local PostgreSQL 16 service for development
+- automatic schema initialization from `storage/postgres/init/001_create_tables.sql`
+- persistent storage through a named Docker volume
+- health checks for service readiness
+- base tables `processed_iot_logs` and `invalid_iot_logs`
+
+## 11. Stage 4B warehouse loader
+
+Stage 4B adds a warehouse loader service that consumes records from Kafka topics `iot_processed_logs` and `iot_invalid_logs`, then inserts them into PostgreSQL tables `processed_iot_logs` and `invalid_iot_logs`.
+
+Run Stage 4B tests:
+
+```bash
+docker compose config
+docker compose run --build --rm warehouse-loader python -m pytest
+```
+
+Run Stage 4B end-to-end verification for valid records:
+
+```bash
+docker compose config
+docker compose up -d kafka kafka-ui kafka-init postgres
+docker compose run --build --rm go-producer
+docker compose run --build --rm -e CONSUMER_GROUP_ID=stage4-valid -e CONSUMER_MAX_MESSAGES=72 python-consumer
+docker compose run --build --rm -e WAREHOUSE_LOADER_GROUP_ID=stage4-loader -e WAREHOUSE_LOADER_MAX_MESSAGES=72 warehouse-loader
+docker exec -it iot-postgres psql -U iot_user -d iot_logs -c "SELECT COUNT(*) FROM processed_iot_logs;"
+docker exec -it iot-postgres psql -U iot_user -d iot_logs -c "SELECT * FROM processed_iot_logs LIMIT 5;"
+```
+
+Run Stage 4B end-to-end verification for invalid records:
+
+```bash
+'{"event_timestamp": }' | docker exec -i iot-kafka /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server localhost:9092 --topic iot_raw_logs
+docker compose run --build --rm -e CONSUMER_GROUP_ID=stage4-invalid -e CONSUMER_MAX_MESSAGES=1 python-consumer
+docker compose run --build --rm -e WAREHOUSE_LOADER_GROUP_ID=stage4-invalid-loader -e WAREHOUSE_LOADER_MAX_MESSAGES=1 warehouse-loader
+docker exec -it iot-postgres psql -U iot_user -d iot_logs -c "SELECT COUNT(*) FROM invalid_iot_logs;"
+docker exec -it iot-postgres psql -U iot_user -d iot_logs -c "SELECT * FROM invalid_iot_logs LIMIT 5;"
+docker compose down
+```
+
+What this stage provides:
+
+- a dedicated `warehouse-loader` Python service
+- Kafka consumption from `iot_processed_logs` and `iot_invalid_logs`
+- PostgreSQL inserts into `processed_iot_logs` and `invalid_iot_logs`
+- mapper tests that run without real Kafka or PostgreSQL
+- clean exits with max message and idle timeout controls
+
+## 12. Security note
 
 Do not commit real credentials, production secrets, or sensitive data. Use environment variables and secret management outside the repository.
 
 ## Current stage
 
-Stage 3 includes:
+Stage 4B includes:
 
 - repository skeleton and documentation
 - local Docker Compose services for Kafka, Kafka topic initialization, and Kafka UI
 - a Go producer that reads sample CSV data and publishes JSON messages to Kafka
 - a Python consumer that validates and routes records to processed and invalid Kafka topics
+- a local PostgreSQL foundation with automatic table initialization for processed and invalid IoT logs
+- a warehouse loader that consumes processed and invalid Kafka topics and writes to PostgreSQL
 - safe local environment placeholders
 
-Storage, dbt, Airflow, Spark, AWS, Terraform, and analytics layers are intentionally not implemented yet and will be added in later stages.
+dbt, Airflow, Spark, AWS, Terraform, and analytics layers are intentionally not implemented yet and will be added in later stages.
