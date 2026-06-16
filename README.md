@@ -4,7 +4,7 @@
 
 IoT Log Intelligence Pipeline is a portfolio project focused on end-to-end data engineering for IoT logs: ingestion, processing, storage, transformation, and analytics.
 
-The repository is currently at Stage 5A, with a working local Kafka stack, a Go producer, a Python consumer validation layer, a local PostgreSQL warehouse foundation, a warehouse loader service, and dbt staging models on top of PostgreSQL.
+The repository is currently at Stage 5B, with a working local Kafka stack, a Go producer, a Python consumer validation layer, a local PostgreSQL warehouse foundation, a warehouse loader service, dbt staging models, and dbt analytics marts on top of PostgreSQL.
 
 ## 2. Planned local architecture
 
@@ -282,13 +282,33 @@ What this stage provides:
 - dbt tests for required fields and allowed categorical values
 - documentation for repeatable local verification
 
-## 13. Security note
+## 13. Stage 5B dbt analytics marts
+
+Stage 5B adds analytics marts on top of the Stage 5A staging models. This stage introduces reusable device, attack, protocol, and pipeline quality summaries in dbt. No dashboard, Airflow, Spark, AWS, Terraform, or CI/CD execution logic is added in this stage.
+
+Run Stage 5B verification:
+
+```bash
+docker compose config
+docker compose run --build --rm dbt dbt run
+docker compose run --build --rm dbt dbt test
+```
+
+What this stage provides:
+
+- analytics marts under `dbt/models/marts/`
+- device-level risk scoring with `HIGH`, `MEDIUM`, and `LOW` bands
+- attack-type and protocol summaries for downstream analytics
+- a one-row pipeline quality mart for processed versus invalid record tracking
+- dbt tests for important mart fields
+
+## 14. Security note
 
 Do not commit real credentials, production secrets, or sensitive data. Use environment variables and secret management outside the repository.
 
 ## Current stage
 
-Stage 5A includes:
+Stage 5B includes:
 
 - repository skeleton and documentation
 - local Docker Compose services for Kafka, Kafka topic initialization, and Kafka UI
@@ -297,6 +317,7 @@ Stage 5A includes:
 - a local PostgreSQL foundation with automatic table initialization for processed and invalid IoT logs
 - a warehouse loader that consumes processed and invalid Kafka topics and writes to PostgreSQL
 - a dbt project with PostgreSQL sources, staging tables, and baseline tests
+- analytics marts for device risk, attack summary, protocol metrics, and pipeline quality
 - safe local environment placeholders
 
 Airflow, Spark, AWS, Terraform, CI/CD, and dashboard layers are intentionally not implemented yet and will be added in later stages.

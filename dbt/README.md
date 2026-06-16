@@ -1,6 +1,6 @@
 # dbt
 
-This directory contains the Stage 5A dbt foundation for the local PostgreSQL warehouse.
+This directory contains the Stage 5B dbt foundation, staging layer, and analytics marts for the local PostgreSQL warehouse.
 
 ## What is included
 
@@ -10,6 +10,11 @@ This directory contains the Stage 5A dbt foundation for the local PostgreSQL war
 - staging models:
   - `stg_processed_iot_logs`
   - `stg_invalid_iot_logs`
+- analytics marts:
+  - `mart_device_risk_summary`
+  - `mart_attack_summary`
+  - `mart_protocol_metrics`
+  - `mart_pipeline_quality_summary`
 - core data quality tests for required fields and allowed categorical values
 
 ## Run dbt locally
@@ -24,4 +29,5 @@ docker compose run --build --rm dbt dbt test
 
 - The dbt container reads PostgreSQL settings from environment variables.
 - `DBT_PROFILES_DIR` is expected to point to `/usr/app/dbt` inside the Docker container.
-- Stage 5A only adds dbt foundation and staging models. Marts, dashboards, orchestration, and cloud deployment are intentionally out of scope.
+- Stage 5B adds analytics marts on top of Stage 5A staging models.
+- Dashboards, Airflow, Spark, AWS, Terraform, CI/CD, and cloud deployment are still intentionally out of scope.
