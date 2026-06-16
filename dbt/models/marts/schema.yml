@@ -1,0 +1,97 @@
+version: 2
+
+models:
+  - name: mart_device_risk_summary
+    description: Device-level risk mart with event volume, quality, and derived risk indicators.
+    columns:
+      - name: device_id
+        tests:
+          - not_null
+          - unique
+      - name: total_events
+        tests:
+          - not_null
+      - name: attack_events
+        tests:
+          - not_null
+      - name: failed_events
+        tests:
+          - not_null
+      - name: attack_rate
+        tests:
+          - not_null
+      - name: failure_rate
+        tests:
+          - not_null
+      - name: first_seen
+        tests:
+          - not_null
+      - name: last_seen
+        tests:
+          - not_null
+      - name: risk_level
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['LOW', 'MEDIUM', 'HIGH']
+
+  - name: mart_attack_summary
+    description: Attack-centric mart summarizing attack volumes and affected devices.
+    columns:
+      - name: attack_type
+        tests:
+          - not_null
+      - name: total_attack_events
+        tests:
+          - not_null
+      - name: affected_devices
+        tests:
+          - not_null
+      - name: first_seen
+        tests:
+          - not_null
+      - name: last_seen
+        tests:
+          - not_null
+
+  - name: mart_protocol_metrics
+    description: Protocol-level mart for event counts, attack rates, and traffic averages.
+    columns:
+      - name: protocol
+        tests:
+          - not_null
+      - name: total_events
+        tests:
+          - not_null
+      - name: attack_events
+        tests:
+          - not_null
+      - name: failed_events
+        tests:
+          - not_null
+      - name: attack_rate
+        tests:
+          - not_null
+      - name: first_seen
+        tests:
+          - not_null
+      - name: last_seen
+        tests:
+          - not_null
+
+  - name: mart_pipeline_quality_summary
+    description: One-row mart summarizing processed versus invalid record volumes.
+    columns:
+      - name: processed_records
+        tests:
+          - not_null
+      - name: invalid_records
+        tests:
+          - not_null
+      - name: total_records
+        tests:
+          - not_null
+      - name: invalid_rate
+        tests:
+          - not_null

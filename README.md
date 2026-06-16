@@ -4,7 +4,7 @@
 
 IoT Log Intelligence Pipeline is a portfolio project focused on end-to-end data engineering for IoT logs: ingestion, processing, storage, transformation, and analytics.
 
-The repository is currently at Stage 4B, with a working local Kafka stack, a Go producer, a Python consumer validation layer, a local PostgreSQL warehouse foundation, and a warehouse loader service.
+The repository is currently at Stage 5B, with a working local Kafka stack, a Go producer, a Python consumer validation layer, a local PostgreSQL warehouse foundation, a warehouse loader service, dbt staging models, and dbt analytics marts on top of PostgreSQL.
 
 ## 2. Planned local architecture
 
@@ -248,13 +248,67 @@ What this stage provides:
 - mapper tests that run without real Kafka or PostgreSQL
 - clean exits with max message and idle timeout controls
 
-## 12. Security note
+## 12. Stage 5A dbt foundation and staging models
+
+Stage 5A adds a local dbt foundation on top of the PostgreSQL warehouse. This stage introduces dbt source definitions, staging models, and baseline data quality tests for processed and invalid IoT logs. No dashboard, Airflow, Spark, AWS, Terraform, or CI/CD execution logic is added in this stage.
+
+Run Stage 5A verification:
+
+```bash
+docker compose config
+docker compose down -v
+docker compose up -d kafka kafka-ui kafka-init postgres
+docker compose run --build --rm -e PRODUCER_SEND_DELAY_MS=0 go-producer
+docker compose run --build --rm -e CONSUMER_GROUP_ID=stage5-valid -e CONSUMER_MAX_MESSAGES=72 python-consumer
+docker compose run --build --rm -e WAREHOUSE_LOADER_GROUP_ID=stage5-loader -e WAREHOUSE_LOADER_MAX_MESSAGES=72 warehouse-loader
+docker compose run --build --rm dbt dbt debug
+docker compose run --build --rm dbt dbt run
+docker compose run --build --rm dbt dbt test
+```
+
+Check created dbt models in PostgreSQL:
+
+```bash
+docker exec -i iot-postgres psql -U iot_user -d iot_logs -P pager=off -c "\dt"
+docker exec -i iot-postgres psql -U iot_user -d iot_logs -P pager=off -c "SELECT COUNT(*) FROM stg_processed_iot_logs;"
+docker exec -i iot-postgres psql -U iot_user -d iot_logs -P pager=off -c "SELECT * FROM stg_processed_iot_logs LIMIT 5;"
+```
+
+What this stage provides:
+
+- a Dockerized dbt runtime configured for the local PostgreSQL warehouse
+- dbt source definitions for `processed_iot_logs` and `invalid_iot_logs`
+- staging models `stg_processed_iot_logs` and `stg_invalid_iot_logs`
+- dbt tests for required fields and allowed categorical values
+- documentation for repeatable local verification
+
+## 13. Stage 5B dbt analytics marts
+
+Stage 5B adds analytics marts on top of the Stage 5A staging models. This stage introduces reusable device, attack, protocol, and pipeline quality summaries in dbt. No dashboard, Airflow, Spark, AWS, Terraform, or CI/CD execution logic is added in this stage.
+
+Run Stage 5B verification:
+
+```bash
+docker compose config
+docker compose run --build --rm dbt dbt run
+docker compose run --build --rm dbt dbt test
+```
+
+What this stage provides:
+
+- analytics marts under `dbt/models/marts/`
+- device-level risk scoring with `HIGH`, `MEDIUM`, and `LOW` bands
+- attack-type and protocol summaries for downstream analytics
+- a one-row pipeline quality mart for processed versus invalid record tracking
+- dbt tests for important mart fields
+
+## 14. Security note
 
 Do not commit real credentials, production secrets, or sensitive data. Use environment variables and secret management outside the repository.
 
 ## Current stage
 
-Stage 4B includes:
+Stage 5B includes:
 
 - repository skeleton and documentation
 - local Docker Compose services for Kafka, Kafka topic initialization, and Kafka UI
@@ -262,6 +316,8 @@ Stage 4B includes:
 - a Python consumer that validates and routes records to processed and invalid Kafka topics
 - a local PostgreSQL foundation with automatic table initialization for processed and invalid IoT logs
 - a warehouse loader that consumes processed and invalid Kafka topics and writes to PostgreSQL
+- a dbt project with PostgreSQL sources, staging tables, and baseline tests
+- analytics marts for device risk, attack summary, protocol metrics, and pipeline quality
 - safe local environment placeholders
 
-dbt, Airflow, Spark, AWS, Terraform, and analytics layers are intentionally not implemented yet and will be added in later stages.
+Airflow, Spark, AWS, Terraform, CI/CD, and dashboard layers are intentionally not implemented yet and will be added in later stages.
