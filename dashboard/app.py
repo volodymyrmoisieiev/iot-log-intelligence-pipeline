@@ -7,6 +7,7 @@ import streamlit as st
 from db import fetch_table_data, get_missing_tables, load_database_config, ping_database
 
 PAGE_TITLE = "IoT Log Intelligence Pipeline Analytics"
+PREPARE_DATA_COMMAND = "docker compose run --build --rm dbt dbt run"
 MART_TABLES = [
     "mart_device_risk_summary",
     "mart_attack_summary",
@@ -21,6 +22,24 @@ RISK_DISPLAY_ORDER = ["HIGH", "MEDIUM", "LOW"]
 @st.cache_data(ttl=30, show_spinner=False)
 def load_table(table_name: str) -> pd.DataFrame:
     return fetch_table_data(table_name=table_name)
+
+
+def render_section_intro(text: str) -> None:
+    st.caption(text)
+
+
+def render_empty_state(message: str, suggestion: str | None = None) -> None:
+    st.info(message)
+    if suggestion:
+        st.caption(suggestion)
+
+
+def render_query_warning(table_name: str, error_name: str) -> None:
+    st.warning(
+        f"The dashboard could not read `{table_name}` right now. Confirm PostgreSQL is available "
+        "and that the dbt marts were built successfully."
+    )
+    st.caption(f"Dashboard error: {error_name}")
 
 
 def render_connection_status() -> bool:
@@ -46,10 +65,16 @@ def render_connection_status() -> bool:
 def render_sidebar(
     device_df: pd.DataFrame, attack_df: pd.DataFrame, protocol_df: pd.DataFrame
 ) -> tuple[list[str], list[str], list[str], int]:
-    st.sidebar.header("Filters")
+    st.sidebar.header("How To Use")
     st.sidebar.caption(
-        "Build dbt marts with `docker compose run --build --rm dbt dbt run` before opening the dashboard."
+        "1. Start PostgreSQL and the pipeline services.\n"
+        f"2. Build dbt marts with `{PREPARE_DATA_COMMAND}`.\n"
+        "3. Refresh this page and explore the filters below."
     )
+    st.sidebar.info("Filters apply to the Device Risk, Attack Summary, Protocol Metrics, and Raw Mart Tables sections.")
+
+    st.sidebar.header("Filters")
+    st.sidebar.caption("If the marts are empty, the dashboard will show friendly guidance instead of crashing.")
 
     device_risk_values = (
         device_df.get("risk_level", pd.Series(dtype=str)).dropna().astype(str).unique().tolist()
@@ -154,16 +179,16 @@ def format_dataframe_for_display(dataframe: pd.DataFrame) -> pd.DataFrame:
     return display_df
 
 
-def render_empty_state(message: str) -> None:
-    st.info(message)
-
-
 def render_pipeline_overview(quality_df: pd.DataFrame) -> None:
     st.header("Pipeline Overview")
+    render_section_intro(
+        "High-level pipeline health metrics from `mart_pipeline_quality_summary`, based on the latest dbt build."
+    )
 
     if quality_df.empty:
         render_empty_state(
-            "`mart_pipeline_quality_summary` is empty. Run the pipeline and `dbt run` before opening the dashboard."
+            "The pipeline quality mart is empty, so the KPI cards cannot be calculated yet.",
+            f"Run the ingestion flow and then `{PREPARE_DATA_COMMAND}` before reopening the dashboard.",
         )
         return
 
@@ -178,21 +203,29 @@ def render_pipeline_overview(quality_df: pd.DataFrame) -> None:
         "Last processed at: "
         f"{quality_row['last_processed_at']} | Last invalid at: {quality_row['last_invalid_at']}"
     )
+    st.caption("This one-row mart is helpful for quickly validating that the local end-to-end pipeline produced expected records.")
     st.dataframe(format_dataframe_for_display(quality_df), width="stretch", hide_index=True)
 
 
 def render_device_risk_section(device_df: pd.DataFrame, selected_risk_levels: list[str], top_n: int) -> None:
     st.header("Device Risk")
+    render_section_intro(
+        "Device-level risk view from `mart_device_risk_summary`, combining event volume, attack rate, failure rate, and derived risk bands."
+    )
 
     if device_df.empty:
         render_empty_state(
-            "`mart_device_risk_summary` is empty. Run the pipeline and dbt marts before using this section."
+            "The device risk mart is empty, so there are no device-level insights to display yet.",
+            f"Run the pipeline and `{PREPARE_DATA_COMMAND}` to populate `mart_device_risk_summary`.",
         )
         return
 
     filtered_df = filter_by_values(device_df, "risk_level", selected_risk_levels)
     if filtered_df.empty:
-        render_empty_state("No device risk rows match the current sidebar filters.")
+        render_empty_state(
+            "No device risk rows match the current filters.",
+            "Try selecting more risk levels in the sidebar or rebuild the marts if you expected device data.",
+        )
         return
 
     prepared_df = prepare_device_risk_dataframe(filtered_df)
@@ -207,12 +240,15 @@ def render_device_risk_section(device_df: pd.DataFrame, selected_risk_levels: li
     )
     chart_columns[0].subheader("Device count by risk level")
     chart_columns[0].bar_chart(risk_counts.set_index("risk_level"))
+    chart_columns[0].caption("Shows how many devices currently fall into each derived risk band.")
 
     top_devices = prepared_df.head(top_n).set_index("device_id")[["total_events"]]
     chart_columns[1].subheader(f"Top {min(top_n, len(prepared_df))} devices by total events")
     chart_columns[1].bar_chart(top_devices)
+    chart_columns[1].caption("Highlights the busiest devices in the filtered view.")
 
-    st.subheader("Device risk summary")
+    st.subheader("Device risk summary table")
+    st.caption("Sorted by risk level first, then by attack rate and total event volume.")
     st.dataframe(
         format_dataframe_for_display(prepared_df.head(top_n)),
         width="stretch",
@@ -224,24 +260,33 @@ def render_attack_summary_section(
     attack_df: pd.DataFrame, selected_attack_types: list[str], top_n: int
 ) -> None:
     st.header("Attack Summary")
+    render_section_intro(
+        "Attack-focused summary from `mart_attack_summary`, useful for understanding the most common attack types and affected devices."
+    )
 
     if attack_df.empty:
         render_empty_state(
-            "`mart_attack_summary` is empty. Run the pipeline and dbt marts before using this section."
+            "The attack summary mart is empty, so attack-level trends are not available yet.",
+            f"Run the pipeline and `{PREPARE_DATA_COMMAND}` to populate `mart_attack_summary`.",
         )
         return
 
     filtered_df = filter_by_values(attack_df, "attack_type", selected_attack_types)
     if filtered_df.empty:
-        render_empty_state("No attack summary rows match the current sidebar filters.")
+        render_empty_state(
+            "No attack summary rows match the current filters.",
+            "Try selecting more attack types in the sidebar or rebuild the marts if you expected attack data.",
+        )
         return
 
     prepared_df = prepare_attack_summary_dataframe(filtered_df)
 
     st.subheader("Attack events by attack type")
     st.bar_chart(prepared_df.head(top_n).set_index("attack_type")[["total_attack_events"]])
+    st.caption("Ranks attack types by total detected attack events in the current filtered view.")
 
     st.subheader("Attack summary table")
+    st.caption("Sorted by total attack events and then by affected device count.")
     st.dataframe(
         format_dataframe_for_display(prepared_df.head(top_n)),
         width="stretch",
@@ -253,24 +298,33 @@ def render_protocol_metrics_section(
     protocol_df: pd.DataFrame, selected_protocols: list[str], top_n: int
 ) -> None:
     st.header("Protocol Metrics")
+    render_section_intro(
+        "Protocol-level metrics from `mart_protocol_metrics`, showing how traffic volume and attack activity are distributed across protocols."
+    )
 
     if protocol_df.empty:
         render_empty_state(
-            "`mart_protocol_metrics` is empty. Run the pipeline and dbt marts before using this section."
+            "The protocol metrics mart is empty, so protocol-level analytics are not available yet.",
+            f"Run the pipeline and `{PREPARE_DATA_COMMAND}` to populate `mart_protocol_metrics`.",
         )
         return
 
     filtered_df = filter_by_values(protocol_df, "protocol", selected_protocols)
     if filtered_df.empty:
-        render_empty_state("No protocol metric rows match the current sidebar filters.")
+        render_empty_state(
+            "No protocol metric rows match the current filters.",
+            "Try selecting more protocols in the sidebar or rebuild the marts if you expected protocol data.",
+        )
         return
 
     prepared_df = prepare_protocol_dataframe(filtered_df)
 
     st.subheader("Total events by protocol")
     st.bar_chart(prepared_df.head(top_n).set_index("protocol")[["total_events"]])
+    st.caption("Shows protocol traffic volume for the current filtered view.")
 
     st.subheader("Protocol metrics table")
+    st.caption("Sorted by total events and then by attack event count.")
     st.dataframe(
         format_dataframe_for_display(prepared_df.head(top_n)),
         width="stretch",
@@ -289,6 +343,9 @@ def render_raw_mart_tables(
     top_n: int,
 ) -> None:
     st.header("Raw Mart Tables")
+    render_section_intro(
+        "Direct table previews from the current dbt marts. These are useful for debugging filters, validating transformations, and capturing portfolio screenshots."
+    )
 
     mart_views = [
         (
@@ -309,8 +366,12 @@ def render_raw_mart_tables(
     for table_name, dataframe in mart_views:
         st.subheader(table_name)
         if dataframe.empty:
-            render_empty_state(f"`{table_name}` has no rows for the current dashboard state.")
+            render_empty_state(
+                f"`{table_name}` has no rows for the current dashboard state.",
+                "This can happen when a mart is empty or when the active sidebar filters remove all rows.",
+            )
             continue
+        st.caption("Table preview for the active dashboard state.")
         st.dataframe(format_dataframe_for_display(dataframe), width="stretch", hide_index=True)
 
 
@@ -318,8 +379,11 @@ def main() -> None:
     st.set_page_config(page_title=PAGE_TITLE, layout="wide")
     st.title(PAGE_TITLE)
     st.write(
-        "Stage 6B analytics dashboard for the IoT Log Intelligence Pipeline. "
-        "Use the sidebar filters to explore dbt marts in PostgreSQL through KPIs, charts, and ranked tables."
+        "Stage 6C polished analytics dashboard for the IoT Log Intelligence Pipeline. "
+        "It turns the dbt marts in PostgreSQL into a clean, portfolio-ready UI with KPIs, filters, charts, and raw mart previews."
+    )
+    st.caption(
+        "Preparation reminder: run the pipeline, load PostgreSQL, and build the dbt marts before using the dashboard."
     )
 
     if not render_connection_status():
@@ -339,14 +403,14 @@ def main() -> None:
     if missing_tables:
         missing_list = ", ".join(f"`{table_name}`" for table_name in missing_tables)
         st.warning(
-            "Some dbt marts are not available yet. Run `docker compose run --build --rm dbt dbt run` "
-            f"before using the dashboard. Missing tables: {missing_list}."
+            "Some dbt marts are missing, so a few dashboard sections may stay empty until the models are rebuilt."
         )
+        st.caption(f"Missing marts: {missing_list}")
+        st.caption(f"Recommended fix: run `{PREPARE_DATA_COMMAND}` after loading pipeline data into PostgreSQL.")
 
     mart_frames, mart_errors = load_mart_frames(missing_tables)
     for table_name, error_name in mart_errors.items():
-        st.warning(f"Unable to read `{table_name}` right now.")
-        st.caption(f"Dashboard error: {error_name}")
+        render_query_warning(table_name, error_name)
 
     device_df = mart_frames["mart_device_risk_summary"]
     attack_df = mart_frames["mart_attack_summary"]

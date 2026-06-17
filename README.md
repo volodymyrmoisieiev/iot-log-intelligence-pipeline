@@ -4,7 +4,7 @@
 
 IoT Log Intelligence Pipeline is a portfolio project focused on end-to-end data engineering for IoT logs: ingestion, processing, storage, transformation, and analytics.
 
-The repository is currently at Stage 6B, with a working local Kafka stack, a Go producer, a Python consumer validation layer, a local PostgreSQL warehouse foundation, a warehouse loader service, dbt staging models, dbt analytics marts on top of PostgreSQL, and a Streamlit dashboard with KPIs, charts, and filters.
+The repository is currently at Stage 6C, with a working local Kafka stack, a Go producer, a Python consumer validation layer, a local PostgreSQL warehouse foundation, a warehouse loader service, dbt staging models, dbt analytics marts on top of PostgreSQL, and a polished Streamlit dashboard for local analytics.
 
 ## 2. Planned local architecture
 
@@ -364,13 +364,56 @@ What this stage provides:
 - sorted analytics tables for all current dbt marts
 - empty-state messaging when marts are missing or filtered to zero rows
 
-## 16. Security note
+## 16. Stage 6C Streamlit dashboard polish and final documentation
+
+Stage 6C focuses on dashboard polish, UX improvements, and portfolio-ready documentation. The Streamlit layer remains intentionally simple, but now includes clearer guidance in the UI, friendlier empty states, cleaner section descriptions, and better instructions for local verification and screenshot capture. No Airflow, Spark, AWS, Terraform, CI/CD, deployment logic, authentication, or real credentials are introduced in this stage.
+
+Run Stage 6C verification:
+
+```bash
+docker compose config
+docker compose down -v
+docker compose up -d kafka kafka-ui kafka-init postgres
+docker compose run --build --rm -e PRODUCER_SEND_DELAY_MS=0 go-producer
+docker compose run --build --rm -e CONSUMER_GROUP_ID=stage6c-valid -e CONSUMER_MAX_MESSAGES=72 python-consumer
+docker compose run --build --rm -e WAREHOUSE_LOADER_GROUP_ID=stage6c-loader -e WAREHOUSE_LOADER_MAX_MESSAGES=72 warehouse-loader
+docker compose run --build --rm dbt dbt run
+docker compose run --build --rm dbt dbt test
+docker compose build streamlit-dashboard
+docker compose up -d --force-recreate streamlit-dashboard
+curl -I http://localhost:8501
+```
+
+Open the dashboard at [http://localhost:8501](http://localhost:8501/).
+
+What Stage 6C adds:
+
+- clearer section descriptions and explanatory captions in the UI
+- more user-friendly warnings when dbt marts are missing or empty
+- safer empty-state handling for missing rows and filters returning zero results
+- dashboard usage guidance in the sidebar
+- final documentation for preparing data, running the dashboard, and capturing screenshots
+
+Dashboard sections:
+
+- `Pipeline Overview` shows processed, invalid, total, and invalid-rate KPIs
+- `Device Risk` shows risk distribution, top devices, and ranked device risk rows
+- `Attack Summary` shows attack-event volume by attack type
+- `Protocol Metrics` shows total events by protocol
+- `Raw Mart Tables` shows filtered table previews from the current marts
+
+Portfolio screenshot recommendation:
+
+- store screenshots in `docs/screenshots/`
+- useful captures include the dashboard overview, pipeline KPI section, device risk section, and attack/protocol charts
+
+## 17. Security note
 
 Do not commit real credentials, production secrets, or sensitive data. Use environment variables and secret management outside the repository.
 
 ## Current stage
 
-Stage 6B includes:
+Stage 6C includes:
 
 - repository skeleton and documentation
 - local Docker Compose services for Kafka, Kafka topic initialization, and Kafka UI
@@ -380,7 +423,7 @@ Stage 6B includes:
 - a warehouse loader that consumes processed and invalid Kafka topics and writes to PostgreSQL
 - a dbt project with PostgreSQL sources, staging tables, and baseline tests
 - analytics marts for device risk, attack summary, protocol metrics, and pipeline quality
-- a Streamlit dashboard with KPI cards, filters, charts, and mart tables
+- a polished Streamlit dashboard with KPI cards, filters, charts, mart tables, and portfolio-ready UX guidance
 - safe local environment placeholders
 
 Airflow, Spark, AWS, Terraform, CI/CD, and advanced dashboard features are intentionally not implemented yet and will be added in later stages.
