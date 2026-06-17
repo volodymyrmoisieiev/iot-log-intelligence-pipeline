@@ -4,7 +4,7 @@
 
 IoT Log Intelligence Pipeline is a portfolio project focused on end-to-end data engineering for IoT logs: ingestion, processing, storage, transformation, and analytics.
 
-The repository is currently at Stage 6C, with a working local Kafka stack, a Go producer, a Python consumer validation layer, a local PostgreSQL warehouse foundation, a warehouse loader service, dbt staging models, dbt analytics marts on top of PostgreSQL, and a polished Streamlit dashboard for local analytics.
+The repository is currently at Stage 7A, with a working local Kafka stack, a Go producer, a Python consumer validation layer, a local PostgreSQL warehouse foundation, a warehouse loader service, dbt staging models, dbt analytics marts on top of PostgreSQL, a polished Streamlit dashboard for local analytics, and a local Apache Airflow foundation with a smoke DAG.
 
 ## 2. Planned local architecture
 
@@ -407,13 +407,57 @@ Portfolio screenshot recommendation:
 - store screenshots in `docs/screenshots/`
 - useful captures include the dashboard overview, pipeline KPI section, device risk section, and attack/protocol charts
 
-## 17. Security note
+## 17. Stage 7A Airflow orchestration foundation
+
+Stage 7A adds the local Apache Airflow foundation for future orchestration. This stage is intentionally limited to infrastructure and a smoke DAG only. No real producer, consumer, warehouse loader, dbt, dashboard, Spark, AWS, Terraform, CI/CD, deployment, or credential orchestration is introduced here.
+
+Run Stage 7A verification:
+
+```bash
+docker compose config
+docker compose up -d airflow-postgres airflow-init
+docker compose up -d airflow-webserver airflow-scheduler
+docker compose ps
+docker compose logs airflow-webserver --tail=50
+docker compose logs airflow-scheduler --tail=50
+```
+
+Open Airflow at [http://localhost:8081](http://localhost:8081/).
+
+Local login:
+
+- username: `airflow`
+- password: `airflow`
+
+What this stage provides:
+
+- a dedicated `airflow-postgres` metadata database separate from the warehouse PostgreSQL service
+- `airflow-init`, `airflow-webserver`, and `airflow-scheduler` services in Docker Compose
+- mounted local Airflow directories for DAGs, logs, and plugins
+- a safe manual smoke DAG named `iot_pipeline_smoke_dag`
+- a local Airflow UI on port `8081`
+
+How to validate the smoke DAG:
+
+- start the services with the commands above
+- open [http://localhost:8081](http://localhost:8081/)
+- sign in with `airflow / airflow`
+- confirm that `iot_pipeline_smoke_dag` appears in the DAG list
+- optionally trigger the DAG manually to verify that Airflow executes simple tasks successfully
+
+How to stop the Airflow services:
+
+```bash
+docker compose stop airflow-webserver airflow-scheduler airflow-postgres
+```
+
+## 18. Security note
 
 Do not commit real credentials, production secrets, or sensitive data. Use environment variables and secret management outside the repository.
 
 ## Current stage
 
-Stage 6C includes:
+Stage 7A includes:
 
 - repository skeleton and documentation
 - local Docker Compose services for Kafka, Kafka topic initialization, and Kafka UI
@@ -424,6 +468,7 @@ Stage 6C includes:
 - a dbt project with PostgreSQL sources, staging tables, and baseline tests
 - analytics marts for device risk, attack summary, protocol metrics, and pipeline quality
 - a polished Streamlit dashboard with KPI cards, filters, charts, mart tables, and portfolio-ready UX guidance
+- a local Apache Airflow foundation with a separate metadata database, webserver, scheduler, and smoke DAG
 - safe local environment placeholders
 
-Airflow, Spark, AWS, Terraform, CI/CD, and advanced dashboard features are intentionally not implemented yet and will be added in later stages.
+Full Airflow orchestration of the producer, consumer, warehouse loader, dbt, and dashboard is intentionally not implemented yet. Spark, AWS, Terraform, CI/CD, and deployment features will be added in later stages.
