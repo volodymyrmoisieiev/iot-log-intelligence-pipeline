@@ -4,7 +4,7 @@
 
 IoT Log Intelligence Pipeline is a portfolio project focused on end-to-end data engineering for IoT logs: ingestion, processing, storage, transformation, and analytics.
 
-The repository is currently at Stage 7C, with a working local Kafka stack, a Go producer, a Python consumer validation layer, a local PostgreSQL warehouse foundation, a warehouse loader service, dbt staging models, dbt analytics marts on top of PostgreSQL, a polished Streamlit dashboard for local analytics, and safer repeatable local Apache Airflow orchestration for the existing pipeline steps.
+The repository is currently at Stage 8C, with a working local Kafka stack, a Go producer, a Python consumer validation layer, a local PostgreSQL warehouse foundation, a warehouse loader service, dbt staging models, dbt analytics marts on top of PostgreSQL, a polished Streamlit dashboard for local analytics, safer repeatable local Apache Airflow orchestration for the existing pipeline steps, and a lightweight GitHub Actions CI workflow for repository validation, tests, dbt project validation, and Airflow DAG validation.
 
 ## 2. Planned local architecture
 
@@ -108,9 +108,12 @@ iot-log-intelligence-pipeline/
 - Stage 5: dbt + SQL metrics
 - Stage 6: Streamlit dashboard
 - Stage 7: Airflow
-- Stage 8: PySpark
+- Stage 8A: basic CI quality automation
+- Stage 8B: dbt validation in CI
+- Stage 8C: Airflow DAG validation in CI
+- Stage 8D: PySpark
 - Stage 9: AWS + Terraform
-- Stage 10: CI/CD + final docs
+- Stage 10: CD + final docs
 
 ## 7. Stage 1 local setup
 
@@ -598,13 +601,32 @@ What Stage 7C does not do:
 - it does not start the Streamlit dashboard
 - it does not add any cloud or production orchestration
 
-## 21. Security note
+## 21. Basic CI with GitHub Actions
+
+GitHub Actions now provides a lightweight CI workflow for pull requests and pushes targeting `develop` and `main`.
+
+The current CI scope is intentionally small and focused on core quality checks:
+
+- validate the Docker Compose configuration with `docker compose config`
+- run Go tests in `go-producer`
+- run Python consumer tests in `python-consumer`
+- run warehouse-loader tests in `warehouse-loader`
+- parse and compile the dbt project in `dbt/`
+- validate Airflow DAG syntax and imports in `airflow/dags/`
+
+The dbt CI step checks project syntax, model references, and compilation safety without running the full warehouse pipeline.
+
+The Airflow CI step checks DAG syntax and import safety without starting the Airflow webserver or scheduler and without triggering DAG runs.
+
+Full pipeline execution still happens locally through Docker Compose and Airflow. CI does not yet start Kafka, PostgreSQL, Airflow services, Streamlit, or the full dbt runtime for `dbt run` / `dbt test`, and it does not include deployment, registry publishing, cloud infrastructure, or production secrets.
+
+## 22. Security note
 
 Do not commit real credentials, production secrets, or sensitive data. Use environment variables and secret management outside the repository.
 
-## Current stage
+## 23. Current stage
 
-Stage 7D includes:
+Stage 8C includes:
 
 - repository skeleton and documentation
 - local Docker Compose services for Kafka, Kafka topic initialization, and Kafka UI
@@ -616,6 +638,7 @@ Stage 7D includes:
 - analytics marts for device risk, attack summary, protocol metrics, and pipeline quality
 - a polished Streamlit dashboard with KPI cards, filters, charts, mart tables, and portfolio-ready UX guidance
 - a local Apache Airflow foundation with a separate metadata database, webserver, scheduler, smoke DAG, safer repeatable local orchestration DAG, and polished local documentation
+- a lightweight GitHub Actions CI workflow for Docker Compose validation, Go and Python tests, safe dbt parse/compile checks, and Airflow DAG syntax/import validation on `develop` and `main`
 - safe local environment placeholders
 
-Airflow now orchestrates the existing local producer, consumer, warehouse loader, and dbt steps through a manual DAG that is safer for repeated demo runs and better documented for local development. Streamlit dashboard startup, Spark, AWS, Terraform, CI/CD, and deployment features will be added in later stages.
+Airflow now orchestrates the existing local producer, consumer, warehouse loader, and dbt steps through a manual DAG that is safer for repeated demo runs and better documented for local development. Full dbt `run` and `test` execution and full Airflow orchestration are still verified locally through Docker Compose or Airflow, while CI is limited to safe validation checks. Streamlit dashboard startup, Spark, AWS, Terraform, deployment, and fuller CD features will be added in later stages.
