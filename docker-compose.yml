@@ -191,6 +191,21 @@ services:
     profiles:
       - dashboard
 
+  spark-batch:
+    build:
+      context: ./spark
+    container_name: iot-spark-batch
+    command: python /app/jobs/smoke_job.py
+    volumes:
+      - type: bind
+        source: ${HOST_PROJECT_ROOT:-.}/spark/jobs
+        target: /app/jobs
+      - type: bind
+        source: ${HOST_PROJECT_ROOT:-.}/data
+        target: /app/data
+    profiles:
+      - spark
+
   airflow-postgres:
     image: postgres:16
     container_name: iot-airflow-postgres
