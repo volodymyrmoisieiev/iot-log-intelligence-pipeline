@@ -4,7 +4,7 @@
 
 IoT Log Intelligence Pipeline is a portfolio project focused on end-to-end data engineering for IoT logs: ingestion, processing, storage, transformation, and analytics.
 
-The repository is currently at Stage 7C, with a working local Kafka stack, a Go producer, a Python consumer validation layer, a local PostgreSQL warehouse foundation, a warehouse loader service, dbt staging models, dbt analytics marts on top of PostgreSQL, a polished Streamlit dashboard for local analytics, and safer repeatable local Apache Airflow orchestration for the existing pipeline steps.
+The repository is currently at Stage 8A, with a working local Kafka stack, a Go producer, a Python consumer validation layer, a local PostgreSQL warehouse foundation, a warehouse loader service, dbt staging models, dbt analytics marts on top of PostgreSQL, a polished Streamlit dashboard for local analytics, safer repeatable local Apache Airflow orchestration for the existing pipeline steps, and a basic GitHub Actions CI workflow for repository validation and tests.
 
 ## 2. Planned local architecture
 
@@ -108,9 +108,10 @@ iot-log-intelligence-pipeline/
 - Stage 5: dbt + SQL metrics
 - Stage 6: Streamlit dashboard
 - Stage 7: Airflow
-- Stage 8: PySpark
+- Stage 8A: basic CI quality automation
+- Stage 8B: PySpark
 - Stage 9: AWS + Terraform
-- Stage 10: CI/CD + final docs
+- Stage 10: CD + final docs
 
 ## 7. Stage 1 local setup
 
@@ -598,13 +599,26 @@ What Stage 7C does not do:
 - it does not start the Streamlit dashboard
 - it does not add any cloud or production orchestration
 
-## 21. Security note
+## 21. Basic CI with GitHub Actions
+
+GitHub Actions now provides a lightweight CI workflow for pull requests and pushes targeting `develop` and `main`.
+
+The current CI scope is intentionally small and focused on core quality checks:
+
+- validate the Docker Compose configuration with `docker compose config`
+- run Go tests in `go-producer`
+- run Python consumer tests in `python-consumer`
+- run warehouse-loader tests in `warehouse-loader`
+
+Full pipeline execution still happens locally through Docker Compose and Airflow. CI does not yet start Kafka, PostgreSQL, Airflow, Streamlit, or dbt services, and it does not include deployment, registry publishing, cloud infrastructure, or production secrets.
+
+## 22. Security note
 
 Do not commit real credentials, production secrets, or sensitive data. Use environment variables and secret management outside the repository.
 
-## Current stage
+## 23. Current stage
 
-Stage 7D includes:
+Stage 8A includes:
 
 - repository skeleton and documentation
 - local Docker Compose services for Kafka, Kafka topic initialization, and Kafka UI
@@ -616,6 +630,7 @@ Stage 7D includes:
 - analytics marts for device risk, attack summary, protocol metrics, and pipeline quality
 - a polished Streamlit dashboard with KPI cards, filters, charts, mart tables, and portfolio-ready UX guidance
 - a local Apache Airflow foundation with a separate metadata database, webserver, scheduler, smoke DAG, safer repeatable local orchestration DAG, and polished local documentation
+- a basic GitHub Actions CI workflow for Docker Compose validation plus Go and Python test execution on `develop` and `main`
 - safe local environment placeholders
 
-Airflow now orchestrates the existing local producer, consumer, warehouse loader, and dbt steps through a manual DAG that is safer for repeated demo runs and better documented for local development. Streamlit dashboard startup, Spark, AWS, Terraform, CI/CD, and deployment features will be added in later stages.
+Airflow now orchestrates the existing local producer, consumer, warehouse loader, and dbt steps through a manual DAG that is safer for repeated demo runs and better documented for local development. Streamlit dashboard startup, Spark, AWS, Terraform, deployment, and fuller CD features will be added in later stages.
