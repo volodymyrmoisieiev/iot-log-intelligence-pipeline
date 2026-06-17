@@ -4,7 +4,7 @@
 
 IoT Log Intelligence Pipeline is a portfolio project focused on end-to-end data engineering for IoT logs: ingestion, processing, storage, transformation, and analytics.
 
-The repository is currently at Stage 5B, with a working local Kafka stack, a Go producer, a Python consumer validation layer, a local PostgreSQL warehouse foundation, a warehouse loader service, dbt staging models, and dbt analytics marts on top of PostgreSQL.
+The repository is currently at Stage 6A, with a working local Kafka stack, a Go producer, a Python consumer validation layer, a local PostgreSQL warehouse foundation, a warehouse loader service, dbt staging models, dbt analytics marts on top of PostgreSQL, and a foundational Streamlit dashboard.
 
 ## 2. Planned local architecture
 
@@ -302,13 +302,45 @@ What this stage provides:
 - a one-row pipeline quality mart for processed versus invalid record tracking
 - dbt tests for important mart fields
 
-## 14. Security note
+## 14. Stage 6A Streamlit dashboard foundation
+
+Stage 6A adds the first Streamlit dashboard layer for local analytics on top of the existing dbt marts in PostgreSQL. This stage focuses on a safe local foundation only: Dockerized Streamlit, PostgreSQL connectivity through environment variables, basic KPI cards, and simple mart previews. No advanced charts, filters, Airflow, Spark, AWS, Terraform, or CI/CD execution logic is added in this stage.
+
+Run Stage 6A verification:
+
+```bash
+docker compose config
+docker compose down -v
+docker compose up -d kafka kafka-ui kafka-init postgres
+docker compose run --build --rm -e PRODUCER_SEND_DELAY_MS=0 go-producer
+docker compose run --build --rm -e CONSUMER_GROUP_ID=stage6a-valid -e CONSUMER_MAX_MESSAGES=72 python-consumer
+docker compose run --build --rm -e WAREHOUSE_LOADER_GROUP_ID=stage6a-loader -e WAREHOUSE_LOADER_MAX_MESSAGES=72 warehouse-loader
+docker compose run --build --rm dbt dbt run
+docker compose run --build --rm dbt dbt test
+docker compose up --build streamlit-dashboard
+```
+
+Open the dashboard at [http://localhost:8501](http://localhost:8501/).
+
+What this stage provides:
+
+- a Dockerized Streamlit service under `dashboard/`
+- reusable PostgreSQL connection helpers driven by environment variables
+- connection status and friendly error handling in the UI
+- basic KPI cards from `mart_pipeline_quality_summary`
+- simple table previews for:
+  - `mart_device_risk_summary`
+  - `mart_attack_summary`
+  - `mart_protocol_metrics`
+  - `mart_pipeline_quality_summary`
+
+## 15. Security note
 
 Do not commit real credentials, production secrets, or sensitive data. Use environment variables and secret management outside the repository.
 
 ## Current stage
 
-Stage 5B includes:
+Stage 6A includes:
 
 - repository skeleton and documentation
 - local Docker Compose services for Kafka, Kafka topic initialization, and Kafka UI
@@ -318,6 +350,7 @@ Stage 5B includes:
 - a warehouse loader that consumes processed and invalid Kafka topics and writes to PostgreSQL
 - a dbt project with PostgreSQL sources, staging tables, and baseline tests
 - analytics marts for device risk, attack summary, protocol metrics, and pipeline quality
+- a Streamlit dashboard foundation that reads dbt marts from PostgreSQL
 - safe local environment placeholders
 
-Airflow, Spark, AWS, Terraform, CI/CD, and dashboard layers are intentionally not implemented yet and will be added in later stages.
+Airflow, Spark, AWS, Terraform, CI/CD, and advanced dashboard features are intentionally not implemented yet and will be added in later stages.
