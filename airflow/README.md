@@ -1,12 +1,14 @@
 # Airflow
 
-Stage 7B adds local Apache Airflow orchestration for the IoT Log Intelligence Pipeline.
+Stage 7C adds safer repeated local-run behavior for Apache Airflow orchestration in the IoT Log Intelligence Pipeline.
 
 This stage keeps the scope intentionally local:
 
 - it preserves the separate Airflow metadata PostgreSQL database
 - it keeps the Stage 7A smoke DAG for quick Airflow health checks
-- it adds a manual orchestration DAG for the existing local Kafka, PostgreSQL, producer, consumer, warehouse-loader, and dbt steps
+- it keeps the manual orchestration DAG for the existing local Kafka, PostgreSQL, producer, consumer, warehouse-loader, and dbt steps
+- it adds Kafka reset and warehouse truncate steps for safer repeatable demo runs
+- it generates unique Kafka consumer and loader group ids per Airflow run
 - it does not add Spark, AWS, Terraform, CI/CD, deployment logic, authentication, or real credentials
 - it does not start the Streamlit dashboard from Airflow
 - it uses a small custom Airflow image that adds Docker Compose support for local orchestration
@@ -36,7 +38,7 @@ Airflow uses these Docker Compose services:
 
 The metadata database is separate from the project warehouse PostgreSQL service.
 
-For Stage 7B local orchestration, the Airflow services also mount:
+For Stage 7C local orchestration, the Airflow services also mount:
 
 - the full project repository at `/opt/project`
 - the local Docker socket at `/var/run/docker.sock`
@@ -98,12 +100,14 @@ Tasks:
 
 ### `iot_local_pipeline_dag`
 
-Use this DAG to orchestrate the existing local data pipeline steps manually.
+Use this DAG to orchestrate the existing local data pipeline steps manually with safer repeated-run behavior.
 
 Task order:
 
 - `start`
+- `reset_local_pipeline_state`
 - `start_infrastructure`
+- `truncate_warehouse_tables`
 - `run_go_producer`
 - `run_python_consumer`
 - `run_warehouse_loader`
@@ -113,14 +117,17 @@ Task order:
 
 What each orchestration task does:
 
+- `reset_local_pipeline_state` stops and removes only Kafka runtime containers so the next run starts with fresh local Kafka state
 - `start_infrastructure` starts Kafka, Kafka UI, topic initialization, and the warehouse PostgreSQL service
+- `truncate_warehouse_tables` clears only `processed_iot_logs` and `invalid_iot_logs` with `RESTART IDENTITY`
 - `run_go_producer` runs the existing Go producer with zero send delay
-- `run_python_consumer` processes a bounded batch of local Kafka messages
-- `run_warehouse_loader` loads processed and invalid records into PostgreSQL
+- `run_python_consumer` processes a bounded batch of local Kafka messages with a unique consumer group id per DAG run
+- `run_warehouse_loader` loads processed and invalid records into PostgreSQL with a unique loader group id per DAG run
 - `run_dbt_run` executes existing dbt models
 - `run_dbt_test` executes existing dbt tests
 
 The Streamlit dashboard is intentionally not started by this DAG.
+Airflow metadata tables are intentionally not truncated or reset by this DAG.
 
 ## Trigger `iot_local_pipeline_dag`
 
@@ -131,6 +138,8 @@ After the services are up:
 3. Confirm that `iot_local_pipeline_dag` is visible in the DAG list.
 4. Trigger the DAG manually from the Airflow UI.
 5. Watch the tasks run in order from `start` through `finish`.
+
+For repeatability checks, trigger the DAG a second time after the first run succeeds. The Kafka reset step, warehouse truncate step, and unique run-scoped group ids make repeated local demo runs more consistent.
 
 Both DAGs are paused by default and have no schedule, so they are safe for local development.
 
