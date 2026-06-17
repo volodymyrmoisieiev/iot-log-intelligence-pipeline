@@ -518,6 +518,43 @@ What this DAG does not do:
 
 Stage 7C improves `iot_local_pipeline_dag` for repeatable local demo runs. This stage keeps the orchestration local-only and avoids destructive resets of Airflow metadata or warehouse volumes. No Spark, AWS, Terraform, CI/CD, deployment logic, authentication, production secrets, or external services are introduced here.
 
+## 20. Stage 7D Airflow documentation and developer-experience polish
+
+Stage 7D focuses on documentation, screenshots guidance, troubleshooting, and PR-readiness polish for the local Airflow orchestration stage. No new cloud, CI/CD, deployment, authentication, or external-service behavior is added here.
+
+Stage 7 summary:
+
+- Airflow runs locally through Docker Compose
+- Airflow UI is available at [http://localhost:8081](http://localhost:8081/)
+- `iot_pipeline_smoke_dag` verifies basic Airflow functionality
+- `iot_local_pipeline_dag` orchestrates the local pipeline for demo runs
+- repeated local DAG runs are safer because Kafka runtime state is reset, warehouse pipeline tables are truncated, and consumer group ids are unique per run
+
+High-level `iot_local_pipeline_dag` flow:
+
+- `start`
+- `reset_local_pipeline_state`
+- `start_infrastructure`
+- `truncate_warehouse_tables`
+- `run_go_producer`
+- `run_python_consumer`
+- `run_warehouse_loader`
+- `run_dbt_run`
+- `run_dbt_test`
+- `finish`
+
+Expected successful result:
+
+- Go producer sends `72` records
+- Python consumer processes `72` records
+- warehouse-loader inserts `72` processed records
+- `dbt run` passes
+- `dbt test` passes with `53` tests
+
+Important note:
+
+- the Airflow DAG does not start the Streamlit dashboard
+
 Run Stage 7C verification:
 
 ```bash
@@ -561,13 +598,13 @@ What Stage 7C does not do:
 - it does not start the Streamlit dashboard
 - it does not add any cloud or production orchestration
 
-## 20. Security note
+## 21. Security note
 
 Do not commit real credentials, production secrets, or sensitive data. Use environment variables and secret management outside the repository.
 
 ## Current stage
 
-Stage 7C includes:
+Stage 7D includes:
 
 - repository skeleton and documentation
 - local Docker Compose services for Kafka, Kafka topic initialization, and Kafka UI
@@ -578,7 +615,7 @@ Stage 7C includes:
 - a dbt project with PostgreSQL sources, staging tables, and baseline tests
 - analytics marts for device risk, attack summary, protocol metrics, and pipeline quality
 - a polished Streamlit dashboard with KPI cards, filters, charts, mart tables, and portfolio-ready UX guidance
-- a local Apache Airflow foundation with a separate metadata database, webserver, scheduler, smoke DAG, and safer repeatable local orchestration DAG
+- a local Apache Airflow foundation with a separate metadata database, webserver, scheduler, smoke DAG, safer repeatable local orchestration DAG, and polished local documentation
 - safe local environment placeholders
 
-Airflow now orchestrates the existing local producer, consumer, warehouse loader, and dbt steps through a manual DAG that is safer for repeated demo runs. Streamlit dashboard startup, Spark, AWS, Terraform, CI/CD, and deployment features will be added in later stages.
+Airflow now orchestrates the existing local producer, consumer, warehouse loader, and dbt steps through a manual DAG that is safer for repeated demo runs and better documented for local development. Streamlit dashboard startup, Spark, AWS, Terraform, CI/CD, and deployment features will be added in later stages.

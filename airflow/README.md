@@ -1,8 +1,8 @@
 # Airflow
 
-Stage 7C adds safer repeated local-run behavior for Apache Airflow orchestration in the IoT Log Intelligence Pipeline.
+Stage 7 covers the local Apache Airflow foundation and orchestration layer for the IoT Log Intelligence Pipeline.
 
-This stage keeps the scope intentionally local:
+This Airflow setup is intentionally local-development only:
 
 - it preserves the separate Airflow metadata PostgreSQL database
 - it keeps the Stage 7A smoke DAG for quick Airflow health checks
@@ -12,6 +12,15 @@ This stage keeps the scope intentionally local:
 - it does not add Spark, AWS, Terraform, CI/CD, deployment logic, authentication, or real credentials
 - it does not start the Streamlit dashboard from Airflow
 - it uses a small custom Airflow image that adds Docker Compose support for local orchestration
+
+## What Stage 7 does
+
+Stage 7 gives this repository a local orchestration layer so you can:
+
+- bring up Airflow with Docker Compose
+- verify Airflow itself with a smoke DAG
+- trigger the existing local data pipeline from the Airflow UI
+- rerun the pipeline more safely for demos by resetting local Kafka runtime state and truncating only the warehouse pipeline tables
 
 ## Folder layout
 
@@ -38,6 +47,12 @@ Airflow uses these Docker Compose services:
 
 The metadata database is separate from the project warehouse PostgreSQL service.
 
+Why keep them separate:
+
+- Airflow needs its own metadata tables for DAG runs, task history, users, and scheduling state
+- the warehouse PostgreSQL service stores pipeline data such as `processed_iot_logs` and `invalid_iot_logs`
+- separating them keeps orchestration state isolated from analytics data and makes local troubleshooting safer
+
 For Stage 7C local orchestration, the Airflow services also mount:
 
 - the full project repository at `/opt/project`
@@ -46,6 +61,12 @@ For Stage 7C local orchestration, the Airflow services also mount:
 This is intentionally a local-development-only setup so `BashOperator` tasks can run `docker compose` against the existing repository services.
 
 The custom Airflow image installs the Docker Compose plugin on top of the official Apache Airflow image so the orchestration DAG can reuse the repository's existing `docker compose` commands.
+
+Why the Docker socket is mounted:
+
+- `iot_local_pipeline_dag` calls the repository's existing `docker compose` commands from inside Airflow tasks
+- the Airflow container therefore needs access to the local Docker daemon
+- this is useful for local orchestration only and should not be treated as a production deployment pattern
 
 ## Local path requirement
 
@@ -67,10 +88,18 @@ The current Docker Compose file provides a local default for this repository pat
 - Username: `airflow`
 - Password: `airflow`
 
+Related local ports:
+
+- Kafka UI: `http://localhost:8080`
+- Airflow UI: `http://localhost:8081`
+- Streamlit dashboard: `http://localhost:8501`
+- PostgreSQL: `localhost:5432`
+
 ## Start Airflow
 
 ```bash
 docker compose config
+docker compose build airflow-init airflow-webserver airflow-scheduler
 docker compose up -d airflow-postgres airflow-init
 docker compose up -d airflow-webserver airflow-scheduler
 docker compose exec airflow-webserver airflow dags list
@@ -92,6 +121,12 @@ Expected DAGs:
 
 Use this DAG for a quick Airflow check only.
 
+Purpose:
+
+- verify that Airflow loads DAGs
+- verify that a simple task can execute
+- avoid touching Kafka, PostgreSQL warehouse data, dbt, or the dashboard
+
 Tasks:
 
 - `start`
@@ -101,6 +136,12 @@ Tasks:
 ### `iot_local_pipeline_dag`
 
 Use this DAG to orchestrate the existing local data pipeline steps manually with safer repeated-run behavior.
+
+Purpose:
+
+- run the local Kafka -> consumer -> warehouse -> dbt flow from the Airflow UI
+- make demo reruns more consistent
+- keep orchestration logic in Airflow without rewriting the producer, consumer, warehouse-loader, or dbt services
 
 Task order:
 
@@ -129,6 +170,29 @@ What each orchestration task does:
 The Streamlit dashboard is intentionally not started by this DAG.
 Airflow metadata tables are intentionally not truncated or reset by this DAG.
 
+## What repeatable runs reset
+
+`iot_local_pipeline_dag` resets only local demo state that is safe to refresh:
+
+- Kafka containers: `kafka`, `kafka-init`, and `kafka-ui`
+- warehouse pipeline tables:
+  - `processed_iot_logs`
+  - `invalid_iot_logs`
+- Kafka consumer group ids by generating unique names from each Airflow `run_id`
+
+## What repeatable runs do not reset
+
+`iot_local_pipeline_dag` does not:
+
+- reset the Airflow metadata database
+- stop the Airflow webserver
+- stop the Airflow scheduler
+- run `docker compose down -v`
+- remove the warehouse PostgreSQL volume
+- drop the warehouse database
+- delete repository source files
+- start the Streamlit dashboard
+
 ## Trigger `iot_local_pipeline_dag`
 
 After the services are up:
@@ -142,6 +206,98 @@ After the services are up:
 For repeatability checks, trigger the DAG a second time after the first run succeeds. The Kafka reset step, warehouse truncate step, and unique run-scoped group ids make repeated local demo runs more consistent.
 
 Both DAGs are paused by default and have no schedule, so they are safe for local development.
+
+Expected successful local result:
+
+- Go producer sends `72` records
+- Python consumer processes `72` records
+- warehouse-loader inserts `72` processed records
+- `dbt run` succeeds
+- `dbt test` succeeds with `53` tests
+
+## Troubleshooting
+
+### Airflow UI does not open
+
+- confirm `docker compose ps` shows `airflow-webserver` running
+- check `docker compose logs airflow-webserver --tail=80`
+- confirm you are opening [http://localhost:8081](http://localhost:8081/) and not Kafka UI on port `8080`
+
+### Webserver health is still starting
+
+- wait a little longer after `docker compose up`
+- recheck with `docker compose ps`
+- inspect `docker compose logs airflow-webserver --tail=80`
+
+### Docker socket permission issue
+
+- confirm `/var/run/docker.sock` is mounted into the Airflow services
+- confirm the local Docker daemon is running
+- rerun `docker compose exec airflow-webserver docker compose version`
+
+### `docker compose` not found inside Airflow container
+
+- rebuild the Airflow images:
+
+```bash
+docker compose build airflow-init airflow-webserver airflow-scheduler
+docker compose up -d airflow-postgres airflow-init airflow-webserver airflow-scheduler
+```
+
+- the custom Airflow image must include `docker-compose-plugin`
+
+### DAG does not appear in the UI
+
+- run `docker compose exec airflow-webserver airflow dags list`
+- check `docker compose exec airflow-webserver airflow dags show iot_local_pipeline_dag`
+- review `docker compose logs airflow-scheduler --tail=80`
+
+### DAG task fails because previous containers are still running
+
+- `reset_local_pipeline_state` is designed to stop and remove Kafka runtime containers before the next run
+- if a run was interrupted mid-flight, trigger the DAG again so the reset step executes cleanly
+
+### Kafka offsets or repeated runs are confusing
+
+- Stage 7C uses unique consumer and loader group ids per `run_id`
+- Kafka runtime containers are reset before each local pipeline run
+- warehouse tables are truncated before data is reloaded
+
+### Windows `HOST_PROJECT_ROOT` path issue
+
+- use a forward-slash absolute path such as `C:/Users/User/Desktop/Cloud Technologies/IoT_Log_Intelligence_Pipeline`
+- if the repository moves, update `HOST_PROJECT_ROOT` in your local environment or `.env`
+- bind mounts inside Airflow depend on this path being correct
+
+### Port conflicts
+
+- Kafka UI uses `8080`
+- Airflow UI uses `8081`
+- Streamlit uses `8501`
+- PostgreSQL uses `5432`
+
+If one of these ports is already occupied, free the port or adjust your local port mapping before starting the stack.
+
+## Final verification checklist
+
+Run:
+
+```bash
+docker compose config
+docker compose build airflow-init airflow-webserver airflow-scheduler
+docker compose up -d airflow-postgres airflow-init airflow-webserver airflow-scheduler
+docker compose exec airflow-webserver airflow dags list
+docker compose exec airflow-webserver airflow dags show iot_local_pipeline_dag
+```
+
+Manual UI verification:
+
+- open [http://localhost:8081](http://localhost:8081/)
+- log in with `airflow / airflow`
+- confirm both DAGs are visible
+- trigger `iot_local_pipeline_dag`
+- confirm every task reaches `success`
+- confirm `run_dbt_test` reports `53` passing tests
 
 ## Stop services
 
