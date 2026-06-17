@@ -61,13 +61,22 @@ def get_missing_tables(table_names: list[str]) -> list[str]:
     return [table_name for table_name in table_names if table_name not in existing_tables]
 
 
-def fetch_table_preview(table_name: str, limit: int = 20) -> pd.DataFrame:
-    query = sql.SQL("SELECT * FROM {table_name} LIMIT %s").format(
-        table_name=sql.Identifier(table_name)
-    )
+def fetch_table_data(table_name: str, limit: int | None = None) -> pd.DataFrame:
+    query = sql.SQL("SELECT * FROM {table_name}").format(table_name=sql.Identifier(table_name))
+
+    if limit is not None:
+        query = sql.SQL("{base_query} LIMIT %s").format(base_query=query)
+
     with get_connection().cursor() as cursor:
-        cursor.execute(query, (limit,))
+        if limit is None:
+            cursor.execute(query)
+        else:
+            cursor.execute(query, (limit,))
         rows = cursor.fetchall()
         columns = [column.name for column in cursor.description or []]
 
     return pd.DataFrame(rows, columns=columns)
+
+
+def fetch_table_preview(table_name: str, limit: int = 20) -> pd.DataFrame:
+    return fetch_table_data(table_name=table_name, limit=limit)

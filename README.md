@@ -4,7 +4,7 @@
 
 IoT Log Intelligence Pipeline is a portfolio project focused on end-to-end data engineering for IoT logs: ingestion, processing, storage, transformation, and analytics.
 
-The repository is currently at Stage 6A, with a working local Kafka stack, a Go producer, a Python consumer validation layer, a local PostgreSQL warehouse foundation, a warehouse loader service, dbt staging models, dbt analytics marts on top of PostgreSQL, and a foundational Streamlit dashboard.
+The repository is currently at Stage 6B, with a working local Kafka stack, a Go producer, a Python consumer validation layer, a local PostgreSQL warehouse foundation, a warehouse loader service, dbt staging models, dbt analytics marts on top of PostgreSQL, and a Streamlit dashboard with KPIs, charts, and filters.
 
 ## 2. Planned local architecture
 
@@ -334,13 +334,43 @@ What this stage provides:
   - `mart_protocol_metrics`
   - `mart_pipeline_quality_summary`
 
-## 15. Security note
+## 15. Stage 6B Streamlit dashboard metrics, charts, and filters
+
+Stage 6B builds on the Stage 6A dashboard foundation and turns it into a practical analytics UI. This stage adds sidebar filters, ranked tables, and simple charts on top of the existing dbt marts in PostgreSQL. The scope remains local dashboard improvements only. No Airflow, Spark, AWS, Terraform, CI/CD, or real credentials are introduced in this stage.
+
+Run Stage 6B verification:
+
+```bash
+docker compose config
+docker compose down -v
+docker compose up -d kafka kafka-ui kafka-init postgres
+docker compose run --build --rm -e PRODUCER_SEND_DELAY_MS=0 go-producer
+docker compose run --build --rm -e CONSUMER_GROUP_ID=stage6b-valid -e CONSUMER_MAX_MESSAGES=72 python-consumer
+docker compose run --build --rm -e WAREHOUSE_LOADER_GROUP_ID=stage6b-loader -e WAREHOUSE_LOADER_MAX_MESSAGES=72 warehouse-loader
+docker compose run --build --rm dbt dbt run
+docker compose run --build --rm dbt dbt test
+docker compose build streamlit-dashboard
+docker compose up -d streamlit-dashboard
+curl -I http://localhost:8501
+```
+
+Open the dashboard at [http://localhost:8501](http://localhost:8501/).
+
+What this stage provides:
+
+- sidebar filters for `risk_level`, `protocol`, `attack_type`, and `top N`
+- KPI cards for processed, invalid, total, and invalid-rate metrics
+- simple bar charts for device risk, attack volume, and protocol volume
+- sorted analytics tables for all current dbt marts
+- empty-state messaging when marts are missing or filtered to zero rows
+
+## 16. Security note
 
 Do not commit real credentials, production secrets, or sensitive data. Use environment variables and secret management outside the repository.
 
 ## Current stage
 
-Stage 6A includes:
+Stage 6B includes:
 
 - repository skeleton and documentation
 - local Docker Compose services for Kafka, Kafka topic initialization, and Kafka UI
@@ -350,7 +380,7 @@ Stage 6A includes:
 - a warehouse loader that consumes processed and invalid Kafka topics and writes to PostgreSQL
 - a dbt project with PostgreSQL sources, staging tables, and baseline tests
 - analytics marts for device risk, attack summary, protocol metrics, and pipeline quality
-- a Streamlit dashboard foundation that reads dbt marts from PostgreSQL
+- a Streamlit dashboard with KPI cards, filters, charts, and mart tables
 - safe local environment placeholders
 
 Airflow, Spark, AWS, Terraform, CI/CD, and advanced dashboard features are intentionally not implemented yet and will be added in later stages.
