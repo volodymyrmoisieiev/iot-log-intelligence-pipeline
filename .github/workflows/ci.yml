@@ -82,3 +82,39 @@ jobs:
       - name: Run warehouse loader tests
         working-directory: warehouse-loader
         run: python -m pytest
+
+  dbt-validation:
+    name: dbt Validation
+    runs-on: ubuntu-latest
+    env:
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: iot_logs
+      POSTGRES_USER: iot_user
+      POSTGRES_PASSWORD: iot_password
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dbt dependencies
+        working-directory: dbt
+        run: |
+          python -m pip install --upgrade pip
+          pip install dbt-postgres
+
+      - name: Install dbt packages
+        working-directory: dbt
+        run: dbt deps --profiles-dir . || true
+
+      - name: Parse dbt project
+        working-directory: dbt
+        run: dbt parse --profiles-dir .
+
+      - name: Compile dbt project
+        working-directory: dbt
+        run: dbt compile --profiles-dir .
