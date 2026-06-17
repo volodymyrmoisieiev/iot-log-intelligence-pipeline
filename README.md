@@ -4,7 +4,7 @@
 
 IoT Log Intelligence Pipeline is a portfolio project focused on end-to-end data engineering for IoT logs: ingestion, processing, storage, transformation, and analytics.
 
-The repository is currently at Stage 7A, with a working local Kafka stack, a Go producer, a Python consumer validation layer, a local PostgreSQL warehouse foundation, a warehouse loader service, dbt staging models, dbt analytics marts on top of PostgreSQL, a polished Streamlit dashboard for local analytics, and a local Apache Airflow foundation with a smoke DAG.
+The repository is currently at Stage 7B, with a working local Kafka stack, a Go producer, a Python consumer validation layer, a local PostgreSQL warehouse foundation, a warehouse loader service, dbt staging models, dbt analytics marts on top of PostgreSQL, a polished Streamlit dashboard for local analytics, and local Apache Airflow orchestration for the existing pipeline steps.
 
 ## 2. Planned local architecture
 
@@ -429,6 +429,12 @@ Local login:
 - username: `airflow`
 - password: `airflow`
 
+Local path note:
+
+- `iot_local_pipeline_dag` depends on `HOST_PROJECT_ROOT` so Docker Compose inside Airflow can resolve Windows bind mounts correctly
+- use a forward-slash absolute host path such as `C:/Users/User/Desktop/Cloud Technologies/IoT_Log_Intelligence_Pipeline`
+- if the repository lives elsewhere on your machine, override `HOST_PROJECT_ROOT` in your local environment or `.env`
+
 What this stage provides:
 
 - a dedicated `airflow-postgres` metadata database separate from the warehouse PostgreSQL service
@@ -451,13 +457,70 @@ How to stop the Airflow services:
 docker compose stop airflow-webserver airflow-scheduler airflow-postgres
 ```
 
-## 18. Security note
+## 18. Stage 7B Airflow local pipeline orchestration DAG
+
+Stage 7B builds on the Stage 7A Airflow foundation and adds a manual local orchestration DAG for the existing IoT pipeline steps. This stage remains local-development only. No Spark, AWS, Terraform, CI/CD, deployment logic, authentication, or real credentials are introduced here.
+
+Run Stage 7B verification:
+
+```bash
+docker compose config
+docker compose up -d airflow-postgres airflow-init
+docker compose up -d airflow-webserver airflow-scheduler
+docker compose exec airflow-webserver airflow dags list
+```
+
+Expected DAGs:
+
+- `iot_pipeline_smoke_dag`
+- `iot_local_pipeline_dag`
+
+Open Airflow at [http://localhost:8081](http://localhost:8081/).
+
+Local login:
+
+- username: `airflow`
+- password: `airflow`
+
+How to trigger the local orchestration DAG:
+
+- open [http://localhost:8081](http://localhost:8081/)
+- sign in with `airflow / airflow`
+- find `iot_local_pipeline_dag`
+- trigger it manually from the Airflow UI
+- monitor the tasks in graph or grid view
+
+Task order in `iot_local_pipeline_dag`:
+
+- `start`
+- `start_infrastructure`
+- `run_go_producer`
+- `run_python_consumer`
+- `run_warehouse_loader`
+- `run_dbt_run`
+- `run_dbt_test`
+- `finish`
+
+What this stage provides:
+
+- a new manual DAG named `iot_local_pipeline_dag`
+- orchestration of the existing local Docker Compose pipeline steps through Airflow `BashOperator` tasks
+- retained availability of `iot_pipeline_smoke_dag` for lightweight Airflow checks
+- minimal local-only Docker support in Airflow via a small custom Airflow image, project-directory mount, and Docker-socket mount
+
+What this DAG does not do:
+
+- it does not start the Streamlit dashboard
+- it does not add Spark, AWS, Terraform, CI/CD, deployment, authentication, or real credentials
+- it does not rewrite the existing producer, consumer, warehouse-loader, dbt, or dashboard logic
+
+## 19. Security note
 
 Do not commit real credentials, production secrets, or sensitive data. Use environment variables and secret management outside the repository.
 
 ## Current stage
 
-Stage 7A includes:
+Stage 7B includes:
 
 - repository skeleton and documentation
 - local Docker Compose services for Kafka, Kafka topic initialization, and Kafka UI
@@ -468,7 +531,7 @@ Stage 7A includes:
 - a dbt project with PostgreSQL sources, staging tables, and baseline tests
 - analytics marts for device risk, attack summary, protocol metrics, and pipeline quality
 - a polished Streamlit dashboard with KPI cards, filters, charts, mart tables, and portfolio-ready UX guidance
-- a local Apache Airflow foundation with a separate metadata database, webserver, scheduler, and smoke DAG
+- a local Apache Airflow foundation with a separate metadata database, webserver, scheduler, smoke DAG, and manual local orchestration DAG
 - safe local environment placeholders
 
-Full Airflow orchestration of the producer, consumer, warehouse loader, dbt, and dashboard is intentionally not implemented yet. Spark, AWS, Terraform, CI/CD, and deployment features will be added in later stages.
+Airflow now orchestrates the existing local producer, consumer, warehouse loader, and dbt steps through a manual DAG. Streamlit dashboard startup, Spark, AWS, Terraform, CI/CD, and deployment features will be added in later stages.
