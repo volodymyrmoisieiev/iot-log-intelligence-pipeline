@@ -50,6 +50,14 @@ target/
 logs/
 dbt/.user.yml
 
+# Spark
+spark/.ivy2/
+spark/metastore_db/
+spark/spark-warehouse/
+spark/derby.log
+spark/tmp/
+spark/output/
+
 # Airflow
 airflow/logs/*
 !airflow/logs/.gitkeep

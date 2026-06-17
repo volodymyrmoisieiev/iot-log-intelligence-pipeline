@@ -4,7 +4,7 @@
 
 IoT Log Intelligence Pipeline is a portfolio project focused on end-to-end data engineering for IoT logs: ingestion, processing, storage, transformation, and analytics.
 
-The repository is currently at Stage 8C, with a working local Kafka stack, a Go producer, a Python consumer validation layer, a local PostgreSQL warehouse foundation, a warehouse loader service, dbt staging models, dbt analytics marts on top of PostgreSQL, a polished Streamlit dashboard for local analytics, safer repeatable local Apache Airflow orchestration for the existing pipeline steps, and a lightweight GitHub Actions CI workflow for repository validation, tests, dbt project validation, and Airflow DAG validation.
+The repository is currently at Stage 9A, with a working local Kafka stack, a Go producer, a Python consumer validation layer, a local PostgreSQL warehouse foundation, a warehouse loader service, dbt staging models, dbt analytics marts on top of PostgreSQL, a polished Streamlit dashboard for local analytics, safer repeatable local Apache Airflow orchestration for the existing pipeline steps, a lightweight GitHub Actions CI workflow for repository validation, tests, dbt project validation, and Airflow DAG validation, plus a local PySpark batch-processing foundation with a smoke job.
 
 ## 2. Planned local architecture
 
@@ -111,9 +111,10 @@ iot-log-intelligence-pipeline/
 - Stage 8A: basic CI quality automation
 - Stage 8B: dbt validation in CI
 - Stage 8C: Airflow DAG validation in CI
-- Stage 8D: PySpark
-- Stage 9: AWS + Terraform
-- Stage 10: CD + final docs
+- Stage 9A: PySpark batch foundation
+- Stage 9B: batch feature engineering
+- Stage 10: AWS + Terraform
+- Stage 11: CD + final docs
 
 ## 7. Stage 1 local setup
 
@@ -620,13 +621,39 @@ The Airflow CI step checks DAG syntax and import safety without starting the Air
 
 Full pipeline execution still happens locally through Docker Compose and Airflow. CI does not yet start Kafka, PostgreSQL, Airflow services, Streamlit, or the full dbt runtime for `dbt run` / `dbt test`, and it does not include deployment, registry publishing, cloud infrastructure, or production secrets.
 
-## 22. Security note
+## 22. Stage 9A PySpark batch processing foundation
+
+Stage 9A adds the local PySpark foundation for future batch processing work. This stage is intentionally narrow: it only introduces a Dockerized local-mode Spark runtime and a smoke job. No existing producer, consumer, warehouse-loader, dbt, Streamlit, or Airflow logic is changed.
+
+Run Stage 9A verification:
+
+```bash
+docker compose config
+docker compose run --build --rm spark-batch
+```
+
+What this stage provides:
+
+- a dedicated `spark/` workspace for local batch jobs
+- a minimal `spark-batch` Docker Compose service that runs on demand
+- a local `PySpark` runtime pinned in `spark/requirements.txt`
+- a smoke job that starts a `SparkSession`, creates a tiny in-memory DataFrame, runs a simple aggregation, prints the result, and exits cleanly
+
+What this stage does not do:
+
+- it does not implement full batch feature engineering
+- it does not integrate Spark into Airflow yet
+- it does not depend on Kafka, dbt, Streamlit, or PostgreSQL for the smoke test
+- it does not add AWS, EMR, Glue, S3, Terraform, Kubernetes, deployment, or secrets management
+- it does not create a real Spark cluster; this is local PySpark only
+
+## 23. Security note
 
 Do not commit real credentials, production secrets, or sensitive data. Use environment variables and secret management outside the repository.
 
-## 23. Current stage
+## 24. Current stage
 
-Stage 8C includes:
+Stage 9A includes:
 
 - repository skeleton and documentation
 - local Docker Compose services for Kafka, Kafka topic initialization, and Kafka UI
@@ -639,6 +666,7 @@ Stage 8C includes:
 - a polished Streamlit dashboard with KPI cards, filters, charts, mart tables, and portfolio-ready UX guidance
 - a local Apache Airflow foundation with a separate metadata database, webserver, scheduler, smoke DAG, safer repeatable local orchestration DAG, and polished local documentation
 - a lightweight GitHub Actions CI workflow for Docker Compose validation, Go and Python tests, safe dbt parse/compile checks, and Airflow DAG syntax/import validation on `develop` and `main`
+- a local PySpark batch-processing foundation with a dedicated `spark-batch` Docker Compose service and a simple smoke job
 - safe local environment placeholders
 
-Airflow now orchestrates the existing local producer, consumer, warehouse loader, and dbt steps through a manual DAG that is safer for repeated demo runs and better documented for local development. Full dbt `run` and `test` execution and full Airflow orchestration are still verified locally through Docker Compose or Airflow, while CI is limited to safe validation checks. Streamlit dashboard startup, Spark, AWS, Terraform, deployment, and fuller CD features will be added in later stages.
+Airflow now orchestrates the existing local producer, consumer, warehouse loader, and dbt steps through a manual DAG that is safer for repeated demo runs and better documented for local development. Spark is now available as a separate local batch foundation through an on-demand smoke job, but it is not yet integrated into Airflow and does not yet implement full feature engineering. Full dbt `run` and `test` execution and full Airflow orchestration are still verified locally through Docker Compose or Airflow, while CI is limited to safe validation checks. AWS, Terraform, deployment, and fuller CD features will be added in later stages.
