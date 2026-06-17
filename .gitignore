@@ -50,6 +50,14 @@ target/
 logs/
 dbt/.user.yml
 
+# Spark
+spark/.ivy2/
+spark/metastore_db/
+spark/spark-warehouse/
+spark/derby.log
+spark/tmp/
+spark/output/
+
 # Airflow
 airflow/logs/*
 !airflow/logs/.gitkeep
@@ -73,6 +81,9 @@ data/raw/*.zip
 !data/raw/README.md
 data/processed/*
 !data/processed/README.md
+data/processed/spark/
+data/processed/spark/**/_SUCCESS
+data/processed/spark/**/*.crc
 data/samples/*
 !data/samples/README.md
 !data/samples/sample_iot_logs.csv

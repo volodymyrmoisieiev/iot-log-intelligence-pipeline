@@ -27,3 +27,18 @@ Capture suggestions:
 - log in with `airflow / airflow`
 - prefer screenshots after a successful DAG run so task states are clearly visible
 - keep filenames stable so future README references stay easy to maintain
+
+## Spark verification checklist
+
+Recommended Stage 9B verification artifacts:
+
+- terminal output showing `docker compose run --build --rm spark-batch`
+- terminal output showing `docker compose run --build --rm spark-batch python /app/jobs/device_features_job.py`
+- terminal output or file listing showing `data/processed/spark/device_features`
+
+Checklist:
+
+- confirm the smoke job completes successfully
+- confirm the device feature job reads `72` sample rows
+- confirm the device feature job writes `24` device-level feature rows
+- confirm the output directory contains Parquet output files
