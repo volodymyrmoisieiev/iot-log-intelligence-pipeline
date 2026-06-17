@@ -81,6 +81,9 @@ data/raw/*.zip
 !data/raw/README.md
 data/processed/*
 !data/processed/README.md
+data/processed/spark/
+data/processed/spark/**/_SUCCESS
+data/processed/spark/**/*.crc
 data/samples/*
 !data/samples/README.md
 !data/samples/sample_iot_logs.csv
