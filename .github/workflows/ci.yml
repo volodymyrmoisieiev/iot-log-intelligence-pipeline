@@ -118,3 +118,41 @@ jobs:
       - name: Compile dbt project
         working-directory: dbt
         run: dbt compile --profiles-dir .
+
+  airflow-dag-validation:
+    name: Airflow DAG Validation
+    runs-on: ubuntu-latest
+    env:
+      AIRFLOW_HOME: /tmp/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__EXECUTOR: SequentialExecutor
+      AIRFLOW__CORE__DAGS_FOLDER: ${{ github.workspace }}/airflow/dags
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: sqlite:////tmp/airflow_ci.db
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Airflow dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install "apache-airflow==2.10.5"
+
+      - name: Validate Airflow DAG syntax
+        run: |
+          python -m py_compile airflow/dags/iot_pipeline_smoke_dag.py
+          python -m py_compile airflow/dags/iot_local_pipeline_dag.py
+
+      - name: Validate Airflow DAG imports
+        run: |
+          python -c "from airflow.models import DagBag; import sys; dag_bag = DagBag(dag_folder='airflow/dags', include_examples=False); print(f'Loaded DAGs: {sorted(dag_bag.dags.keys())}'); print(f'Import errors: {dag_bag.import_errors}'); sys.exit(1 if dag_bag.import_errors else 0)"
+
+      - name: Initialize Airflow metadata for CLI validation
+        run: airflow db migrate
+
+      - name: List Airflow DAGs
+        run: airflow dags list --subdir airflow/dags
