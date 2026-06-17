@@ -10,7 +10,10 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-iot_password}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./storage/postgres/init:/docker-entrypoint-initdb.d:ro
+      - type: bind
+        source: ${HOST_PROJECT_ROOT:-.}/storage/postgres/init
+        target: /docker-entrypoint-initdb.d
+        read_only: true
     healthcheck:
       test:
         [
@@ -101,7 +104,10 @@ services:
     profiles:
       - producer
     volumes:
-      - ./data:/app/data:ro
+      - type: bind
+        source: ${HOST_PROJECT_ROOT:-.}/data
+        target: /app/data
+        read_only: true
 
   python-consumer:
     build:
@@ -162,7 +168,9 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-iot_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-iot_password}
     volumes:
-      - ./dbt:/usr/app/dbt
+      - type: bind
+        source: ${HOST_PROJECT_ROOT:-.}/dbt
+        target: /usr/app/dbt
     profiles:
       - analytics
 
@@ -183,5 +191,124 @@ services:
     profiles:
       - dashboard
 
+  airflow-postgres:
+    image: postgres:16
+    container_name: iot-airflow-postgres
+    environment:
+      POSTGRES_DB: airflow
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+    volumes:
+      - airflow_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  airflow-init:
+    build:
+      context: ./airflow
+    container_name: iot-airflow-init
+    depends_on:
+      airflow-postgres:
+        condition: service_healthy
+    restart: "no"
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres:5432/airflow
+      AIRFLOW_UID: "50000"
+      HOST_PROJECT_ROOT: ${HOST_PROJECT_ROOT:-C:/Users/User/Desktop/Cloud Technologies/IoT_Log_Intelligence_Pipeline}
+    entrypoint:
+      - /bin/bash
+      - -ec
+    command:
+      - |
+        airflow db migrate
+        airflow users create \
+          --username airflow \
+          --firstname Airflow \
+          --lastname Admin \
+          --role Admin \
+          --email airflow@example.local \
+          --password airflow
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+      - ./:/opt/project
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  airflow-webserver:
+    build:
+      context: ./airflow
+    container_name: iot-airflow-webserver
+    depends_on:
+      airflow-postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    command: webserver
+    ports:
+      - "8081:8080"
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres:5432/airflow
+      AIRFLOW__WEBSERVER__DEFAULT_UI_TIMEZONE: UTC
+      AIRFLOW_UID: "50000"
+      HOST_PROJECT_ROOT: ${HOST_PROJECT_ROOT:-C:/Users/User/Desktop/Cloud Technologies/IoT_Log_Intelligence_Pipeline}
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+      - ./:/opt/project
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl --fail http://localhost:8080/health || exit 1",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  airflow-scheduler:
+    build:
+      context: ./airflow
+    container_name: iot-airflow-scheduler
+    depends_on:
+      airflow-postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    command: scheduler
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres:5432/airflow
+      AIRFLOW_UID: "50000"
+      HOST_PROJECT_ROOT: ${HOST_PROJECT_ROOT:-C:/Users/User/Desktop/Cloud Technologies/IoT_Log_Intelligence_Pipeline}
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+      - ./:/opt/project
+      - /var/run/docker.sock:/var/run/docker.sock
+
 volumes:
   postgres_data:
+  airflow_postgres_data:

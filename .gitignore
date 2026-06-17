@@ -51,8 +51,11 @@ logs/
 dbt/.user.yml
 
 # Airflow
-airflow/logs/
+airflow/logs/*
+!airflow/logs/.gitkeep
 airflow/plugins/__pycache__/
+airflow/plugins/**/*.pyc
+!airflow/plugins/.gitkeep
 airflow/airflow.db
 airflow/standalone_admin_password.txt
 airflow/webserver_config.py
@@ -77,6 +80,8 @@ data/samples/*
 # Logs
 *.log
 logs/
+!airflow/logs/
+!airflow/logs/.gitkeep
 
 # Secrets and local env files
 .env
