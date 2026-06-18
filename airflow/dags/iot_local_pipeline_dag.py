@@ -141,6 +141,14 @@ with DAG(
         execution_timeout=timedelta(minutes=10),
     )
 
+    run_spark_device_features = BashOperator(
+        task_id="run_spark_device_features",
+        bash_command=compose_command(
+            "run --build --rm spark-batch python /app/jobs/device_features_job.py"
+        ),
+        execution_timeout=timedelta(minutes=15),
+    )
+
     finish = EmptyOperator(task_id="finish")
 
     (
@@ -153,5 +161,6 @@ with DAG(
         >> run_warehouse_loader
         >> run_dbt_run
         >> run_dbt_test
+        >> run_spark_device_features
         >> finish
     )
