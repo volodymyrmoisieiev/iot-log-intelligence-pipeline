@@ -80,6 +80,19 @@ Capture suggestions:
 - for Stage 11C, capture both the Airflow task success state and the MinIO prefix view
 - keep filenames stable so future README references stay easy to maintain
 
+## CI screenshots checklist
+
+Optional Stage 12C verification artifacts:
+
+- `github-actions-terraform-validation.png` - GitHub Actions job list showing `Terraform Validation`
+- `github-actions-terraform-validation-logs.png` - logs for `terraform fmt -check -recursive`, `terraform init -backend=false`, and `terraform validate`
+
+Notes:
+
+- AWS credentials are not required for this CI validation job
+- CI does not run `terraform plan` or `terraform apply`
+- capture screenshots only if you later verify the workflow in GitHub Actions
+
 Checklist:
 
 - confirm the smoke job completes successfully

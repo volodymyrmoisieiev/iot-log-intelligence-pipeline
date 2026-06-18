@@ -38,6 +38,7 @@ coverage.out
 .terraform.lock.hcl
 *.tfstate
 *.tfstate.*
+terraform.tfvars
 crash.log
 override.tf
 override.tf.json
