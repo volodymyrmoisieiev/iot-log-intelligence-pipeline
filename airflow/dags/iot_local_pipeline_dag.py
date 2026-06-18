@@ -58,6 +58,7 @@ It is designed for manual local execution only:
 - unique Kafka consumer group ids for each Airflow `run_id`
 
 The DAG does **not** start the Streamlit dashboard and does **not** add any cloud or production orchestration.
+It uploads Spark device features only to local MinIO and does **not** use production AWS S3.
 """
 
 
@@ -183,6 +184,44 @@ with DAG(
         execution_timeout=timedelta(minutes=5),
     )
 
+    start_object_storage = BashOperator(
+        task_id="start_object_storage",
+        bash_command=compose_command(
+            "--profile object-storage up -d minio minio-init"
+        ),
+        execution_timeout=timedelta(minutes=10),
+    )
+
+    upload_spark_features_to_minio = BashOperator(
+        task_id="upload_spark_features_to_minio",
+        bash_command=compose_command(
+            "--profile object-storage run --build --rm object-storage-uploader"
+        ),
+        execution_timeout=timedelta(minutes=15),
+    )
+
+    validate_minio_spark_features_upload = BashOperator(
+        task_id="validate_minio_spark_features_upload",
+        bash_command=compose_command(
+            dedent(
+                """
+                --profile object-storage run --rm --entrypoint /bin/sh minio-init -ec '
+                mc alias set local "$MINIO_ENDPOINT" "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"
+                object_path="local/$MINIO_BUCKET/spark/device_features/latest/"
+
+                if ! mc ls --recursive "$object_path" | grep -E "\\.parquet$" >/dev/null; then
+                    echo "No uploaded Parquet objects found under s3://$MINIO_BUCKET/spark/device_features/latest/" >&2
+                    exit 1
+                fi
+
+                echo "Validated uploaded Parquet objects under s3://$MINIO_BUCKET/spark/device_features/latest/"
+                '
+                """
+            ).strip()
+        ),
+        execution_timeout=timedelta(minutes=5),
+    )
+
     finish = EmptyOperator(task_id="finish")
 
     (
@@ -197,5 +236,8 @@ with DAG(
         >> run_dbt_test
         >> run_spark_device_features
         >> validate_spark_device_features_output
+        >> start_object_storage
+        >> upload_spark_features_to_minio
+        >> validate_minio_spark_features_upload
         >> finish
     )

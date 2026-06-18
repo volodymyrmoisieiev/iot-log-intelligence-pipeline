@@ -29,6 +29,13 @@ Recommended Stage 10 Airflow + Spark screenshots:
 - `airflow-run-spark-device-features-logs.png` - logs for `run_spark_device_features`
 - `airflow-validate-spark-output-logs.png` - logs for `validate_spark_device_features_output`
 
+Recommended Stage 11C Airflow + MinIO screenshots:
+
+- `airflow-local-pipeline-graph-minio.png` - DAG graph showing `start_object_storage`, `upload_spark_features_to_minio`, and `validate_minio_spark_features_upload`
+- `airflow-local-pipeline-task-list-minio.png` - Airflow task list including the three MinIO-related tasks
+- `airflow-upload-spark-features-to-minio-logs.png` - logs for `upload_spark_features_to_minio`
+- `airflow-validate-minio-upload-logs.png` - logs for `validate_minio_spark_features_upload`
+
 Capture suggestions:
 
 - use [http://localhost:8081](http://localhost:8081/) for Airflow screenshots
@@ -70,6 +77,7 @@ Capture suggestions:
 - sign in with `minioadmin / minioadmin`
 - capture screenshots only after `minio-init` completes successfully
 - for Stage 11B, capture the prefix view after a successful upload
+- for Stage 11C, capture both the Airflow task success state and the MinIO prefix view
 - keep filenames stable so future README references stay easy to maintain
 
 Checklist:
@@ -80,3 +88,6 @@ Checklist:
 - confirm the output directory contains Parquet output files
 - confirm the Airflow DAG includes `run_spark_device_features`
 - confirm the Airflow DAG includes `validate_spark_device_features_output`
+- confirm the Airflow DAG includes `start_object_storage`
+- confirm the Airflow DAG includes `upload_spark_features_to_minio`
+- confirm the Airflow DAG includes `validate_minio_spark_features_upload`

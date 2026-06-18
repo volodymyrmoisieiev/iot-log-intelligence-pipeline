@@ -1,10 +1,12 @@
 # Object Storage
 
-## Stage 11A and 11B scope
+## Stage 11A, 11B, and 11C scope
 
 Stage 11A adds a local S3-compatible object storage foundation through MinIO.
 
 Stage 11B builds on that foundation and adds a local uploader for Spark device-feature Parquet output.
+
+Stage 11C wires that uploader into the existing local Airflow DAG so Airflow can start MinIO, upload Spark Parquet output, and validate uploaded objects.
 
 These stages are intentionally limited to local development infrastructure:
 
@@ -12,7 +14,7 @@ These stages are intentionally limited to local development infrastructure:
 - they use one local bucket: `iot-data-lake`
 - they upload Spark output from `data/processed/spark/device_features`
 - they store uploaded files under `spark/device_features/latest/`
-- they do not integrate MinIO into Airflow yet
+- Airflow can now upload and validate objects in local MinIO
 - they do not add AWS, EMR, Glue, Terraform, Kubernetes, deployment, or secrets
 
 ## Local endpoints
@@ -62,6 +64,8 @@ SPARK_FEATURES_OBJECT_PREFIX=spark/device_features/latest
   - uses object prefix `spark/device_features/latest/`
 
 Both services use the Docker Compose profile `object-storage`, which keeps the existing default pipeline startup unchanged unless you explicitly opt in.
+
+Airflow integration in Stage 11C reuses the same services through the existing local `iot_local_pipeline_dag`.
 
 ## Upload script behavior
 
@@ -120,6 +124,24 @@ Successful uploads target:
 - bucket: `iot-data-lake`
 - prefix: `spark/device_features/latest/`
 
+## Airflow integration
+
+Stage 11C adds these `iot_local_pipeline_dag` tasks after local Spark output validation:
+
+- `start_object_storage`
+- `upload_spark_features_to_minio`
+- `validate_minio_spark_features_upload`
+
+Updated Airflow sequence:
+
+- local Spark output is generated in `data/processed/spark/device_features`
+- Airflow validates local Parquet output exists
+- Airflow starts local MinIO services under the `object-storage` profile
+- Airflow uploads Parquet files into bucket `iot-data-lake`
+- Airflow validates that at least one `.parquet` object exists under `spark/device_features/latest/`
+
+This remains local MinIO only and does not add production AWS S3.
+
 ## How to verify uploaded objects
 
 Option 1: MinIO console
@@ -142,5 +164,5 @@ Option 3: rerun the uploader safely
 
 - MinIO data is persisted in the named Docker volume `minio_data`
 - repeated `minio-init` runs should not fail if the bucket already exists
-- Stage 11B is still a manual local upload step; it is not wired into Airflow yet
+- Stage 11C adds Airflow integration for local MinIO upload and validation
 - this is local MinIO only, not real AWS S3
