@@ -21,6 +21,14 @@ Recommended Stage 7 Airflow screenshots:
 - `airflow-run-dbt-test-logs.png` - successful `run_dbt_test` task logs showing `53` tests passing
 - `airflow-homepage.png` - optional Airflow UI homepage on port `8081`
 
+Recommended Stage 10 Airflow + Spark screenshots:
+
+- `airflow-local-pipeline-graph-spark.png` - DAG graph showing `run_spark_device_features` and `validate_spark_device_features_output`
+- `airflow-local-pipeline-task-list-spark.png` - Airflow task list for `iot_local_pipeline_dag` including `validate_spark_device_features_output`
+- `airflow-local-pipeline-success-spark.png` - successful DAG run with both Spark-related tasks marked `success`
+- `airflow-run-spark-device-features-logs.png` - logs for `run_spark_device_features`
+- `airflow-validate-spark-output-logs.png` - logs for `validate_spark_device_features_output`
+
 Capture suggestions:
 
 - use [http://localhost:8081](http://localhost:8081/) for Airflow screenshots
@@ -36,9 +44,17 @@ Recommended Stage 9B verification artifacts:
 - terminal output showing `docker compose run --build --rm spark-batch python /app/jobs/device_features_job.py`
 - terminal output or file listing showing `data/processed/spark/device_features`
 
+Recommended Stage 10 verification artifacts:
+
+- screenshot of `data/processed/spark/device_features` after a successful DAG run
+- screenshot or terminal output showing at least one `part-*.parquet` file
+- optional screenshot of the Airflow graph or grid after the validation task succeeds
+
 Checklist:
 
 - confirm the smoke job completes successfully
 - confirm the device feature job reads `72` sample rows
 - confirm the device feature job writes `24` device-level feature rows
 - confirm the output directory contains Parquet output files
+- confirm the Airflow DAG includes `run_spark_device_features`
+- confirm the Airflow DAG includes `validate_spark_device_features_output`

@@ -6,10 +6,11 @@ This Airflow setup is intentionally local-development only:
 
 - it preserves the separate Airflow metadata PostgreSQL database
 - it keeps the Stage 7A smoke DAG for quick Airflow health checks
-- it keeps the manual orchestration DAG for the existing local Kafka, PostgreSQL, producer, consumer, warehouse-loader, and dbt steps
+- it keeps the manual orchestration DAG for the existing local Kafka, PostgreSQL, producer, consumer, warehouse-loader, dbt, and Spark steps
 - it adds Kafka reset and warehouse truncate steps for safer repeatable demo runs
 - it generates unique Kafka consumer and loader group ids per Airflow run
-- it does not add Spark, AWS, Terraform, CI/CD, deployment logic, authentication, or real credentials
+- it runs Spark through the existing local `spark-batch` Docker Compose service in local Docker mode only
+- it does not add AWS, Terraform, CI/CD, deployment logic, authentication, or real credentials
 - it does not start the Streamlit dashboard from Airflow
 - it uses a small custom Airflow image that adds Docker Compose support for local orchestration
 
@@ -21,6 +22,7 @@ Stage 7 gives this repository a local orchestration layer so you can:
 - verify Airflow itself with a smoke DAG
 - trigger the existing local data pipeline from the Airflow UI
 - rerun the pipeline more safely for demos by resetting local Kafka runtime state and truncating only the warehouse pipeline tables
+- run the PySpark device feature engineering job after dbt and validate that Parquet output exists
 
 ## Folder layout
 
@@ -139,9 +141,9 @@ Use this DAG to orchestrate the existing local data pipeline steps manually with
 
 Purpose:
 
-- run the local Kafka -> consumer -> warehouse -> dbt flow from the Airflow UI
+- run the local Kafka -> consumer -> warehouse -> dbt -> Spark flow from the Airflow UI
 - make demo reruns more consistent
-- keep orchestration logic in Airflow without rewriting the producer, consumer, warehouse-loader, or dbt services
+- keep orchestration logic in Airflow without rewriting the producer, consumer, warehouse-loader, dbt, or Spark services
 
 Task order:
 
@@ -154,6 +156,8 @@ Task order:
 - `run_warehouse_loader`
 - `run_dbt_run`
 - `run_dbt_test`
+- `run_spark_device_features`
+- `validate_spark_device_features_output`
 - `finish`
 
 What each orchestration task does:
@@ -166,9 +170,12 @@ What each orchestration task does:
 - `run_warehouse_loader` loads processed and invalid records into PostgreSQL with a unique loader group id per DAG run
 - `run_dbt_run` executes existing dbt models
 - `run_dbt_test` executes existing dbt tests
+- `run_spark_device_features` runs `python /app/jobs/device_features_job.py` through `spark-batch`
+- `validate_spark_device_features_output` confirms `data/processed/spark/device_features` exists and contains at least one Parquet file
 
 The Streamlit dashboard is intentionally not started by this DAG.
 Airflow metadata tables are intentionally not truncated or reset by this DAG.
+Spark output remains local Parquet output only and is not yet loaded into PostgreSQL by Airflow.
 
 ## What repeatable runs reset
 
@@ -214,6 +221,8 @@ Expected successful local result:
 - warehouse-loader inserts `72` processed records
 - `dbt run` succeeds
 - `dbt test` succeeds with `53` tests
+- `run_spark_device_features` writes Parquet output to `data/processed/spark/device_features`
+- `validate_spark_device_features_output` succeeds after finding at least one Parquet file
 
 ## Troubleshooting
 
@@ -257,6 +266,13 @@ docker compose up -d airflow-postgres airflow-init airflow-webserver airflow-sch
 - `reset_local_pipeline_state` is designed to stop and remove Kafka runtime containers before the next run
 - if a run was interrupted mid-flight, trigger the DAG again so the reset step executes cleanly
 
+### Spark validation task fails
+
+- confirm `run_spark_device_features` succeeded earlier in the same DAG run
+- inspect `data/processed/spark/device_features` for `part-*.parquet` or other `.parquet` files
+- rerun `docker compose run --build --rm spark-batch python /app/jobs/device_features_job.py` if you need to verify the Spark job independently
+- remember that the validation task checks output existence only, not full data quality
+
 ### Kafka offsets or repeated runs are confusing
 
 - Stage 7C uses unique consumer and loader group ids per `run_id`
@@ -288,6 +304,8 @@ docker compose build airflow-init airflow-webserver airflow-scheduler
 docker compose up -d airflow-postgres airflow-init airflow-webserver airflow-scheduler
 docker compose exec airflow-webserver airflow dags list
 docker compose exec airflow-webserver airflow dags show iot_local_pipeline_dag
+docker compose run --rm airflow-webserver python -m py_compile /opt/airflow/dags/iot_local_pipeline_dag.py
+docker compose run --rm airflow-webserver airflow tasks list iot_local_pipeline_dag
 ```
 
 Manual UI verification:
@@ -298,6 +316,9 @@ Manual UI verification:
 - trigger `iot_local_pipeline_dag`
 - confirm every task reaches `success`
 - confirm `run_dbt_test` reports `53` passing tests
+- confirm `run_spark_device_features` succeeds
+- confirm `validate_spark_device_features_output` succeeds
+- confirm `data/processed/spark/device_features` contains Parquet output
 
 ## Stop services
 
