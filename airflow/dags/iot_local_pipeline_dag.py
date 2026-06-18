@@ -26,6 +26,16 @@ def compose_command(command: str) -> str:
     ).strip()
 
 
+def project_command(command: str) -> str:
+    return dedent(
+        f"""
+        set -euo pipefail
+        cd {PROJECT_DIR}
+        {command}
+        """
+    ).strip()
+
+
 default_args = {
     "owner": "airflow",
     "depends_on_past": False,
@@ -141,6 +151,38 @@ with DAG(
         execution_timeout=timedelta(minutes=10),
     )
 
+    run_spark_device_features = BashOperator(
+        task_id="run_spark_device_features",
+        bash_command=compose_command(
+            "run --build --rm spark-batch python /app/jobs/device_features_job.py"
+        ),
+        execution_timeout=timedelta(minutes=15),
+    )
+
+    validate_spark_device_features_output = BashOperator(
+        task_id="validate_spark_device_features_output",
+        bash_command=project_command(
+            dedent(
+                """
+                output_dir="data/processed/spark/device_features"
+
+                if [ ! -d "$output_dir" ]; then
+                    echo "Missing Spark output directory: $output_dir" >&2
+                    exit 1
+                fi
+
+                if ! find "$output_dir" -maxdepth 1 -type f \\( -name 'part-*.parquet' -o -name '*.parquet' \\) | grep -q .; then
+                    echo "No Parquet output files found in: $output_dir" >&2
+                    exit 1
+                fi
+
+                echo "Validated Spark device features output in $output_dir"
+                """
+            ).strip()
+        ),
+        execution_timeout=timedelta(minutes=5),
+    )
+
     finish = EmptyOperator(task_id="finish")
 
     (
@@ -153,5 +195,7 @@ with DAG(
         >> run_warehouse_loader
         >> run_dbt_run
         >> run_dbt_test
+        >> run_spark_device_features
+        >> validate_spark_device_features_output
         >> finish
     )
