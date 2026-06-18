@@ -4,7 +4,7 @@
 
 IoT Log Intelligence Pipeline is a portfolio project focused on end-to-end data engineering for IoT logs: ingestion, processing, storage, transformation, and analytics.
 
-The repository is currently at Stage 9B, with a working local Kafka stack, a Go producer, a Python consumer validation layer, a local PostgreSQL warehouse foundation, a warehouse loader service, dbt staging models, dbt analytics marts on top of PostgreSQL, a polished Streamlit dashboard for local analytics, safer repeatable local Apache Airflow orchestration for the existing pipeline steps, a lightweight GitHub Actions CI workflow for repository validation, tests, dbt project validation, and Airflow DAG validation, plus a local PySpark batch-processing foundation and a device-level feature engineering job that writes Parquet output.
+The repository is currently at Stage 10C, with a working local Kafka stack, a Go producer, a Python consumer validation layer, a local PostgreSQL warehouse foundation, a warehouse loader service, dbt staging models, dbt analytics marts on top of PostgreSQL, a polished Streamlit dashboard for local analytics, safer repeatable local Apache Airflow orchestration for the existing pipeline steps, a lightweight GitHub Actions CI workflow for repository validation, tests, dbt project validation, and Airflow DAG validation, plus a local PySpark batch-processing foundation and a device-level feature engineering job that now runs inside the local Airflow pipeline and validates Parquet output.
 
 ## 2. Planned local architecture
 
@@ -113,8 +113,9 @@ iot-log-intelligence-pipeline/
 - Stage 8C: Airflow DAG validation in CI
 - Stage 9A: PySpark batch foundation
 - Stage 9B: batch feature engineering
-- Stage 10: AWS + Terraform
-- Stage 11: CD + final docs
+- Stage 10: Airflow + PySpark integration
+- Stage 11: AWS + Terraform
+- Stage 12: CD + final docs
 
 ## 7. Stage 1 local setup
 
@@ -682,13 +683,65 @@ What this stage does not do:
 - it does not use S3, EMR, Glue, Terraform, or any cloud infrastructure yet
 - it does not add deployment, Kubernetes, or secrets management
 
-## 24. Security note
+## 24. Stage 10 Airflow + PySpark integration
+
+Stage 10 builds on the earlier local Airflow and PySpark foundations and connects them in the existing local orchestration DAG. The PySpark device feature engineering job now runs as part of `iot_local_pipeline_dag`, and a follow-up validation step confirms that Spark produced Parquet output successfully. Spark still runs in local Docker mode only.
+
+Airflow tasks added in this stage:
+
+- `run_spark_device_features`
+- `validate_spark_device_features_output`
+
+Current task order around dbt and Spark:
+
+- `run_dbt_run`
+- `run_dbt_test`
+- `run_spark_device_features`
+- `validate_spark_device_features_output`
+- `finish`
+
+Spark output details:
+
+- output path: `data/processed/spark/device_features`
+- output format: Parquet
+- validation checks that the output directory exists
+- validation checks that at least one `.parquet` file exists in the output directory
+
+Stage 10 verification commands:
+
+```bash
+docker compose config
+docker compose run --rm airflow-webserver python -m py_compile /opt/airflow/dags/iot_local_pipeline_dag.py
+docker compose run --rm airflow-webserver airflow tasks list iot_local_pipeline_dag
+```
+
+How to verify this stage manually:
+
+- trigger `iot_local_pipeline_dag` from the Airflow UI
+- confirm that `run_spark_device_features` succeeds after `run_dbt_test`
+- confirm that `validate_spark_device_features_output` succeeds before `finish`
+- confirm that `data/processed/spark/device_features` contains Parquet files after the DAG run
+
+What this stage adds:
+
+- local Airflow orchestration of the PySpark device feature engineering job
+- an Airflow validation step that checks for generated Parquet output
+- clearer local verification commands for the updated DAG
+
+What this stage does not add:
+
+- AWS, EMR, Glue, S3, Terraform, or Kubernetes
+- Spark output quality checks beyond file existence
+- PostgreSQL loading for Spark output
+- production deployment or secret-management changes
+
+## 25. Security note
 
 Do not commit real credentials, production secrets, or sensitive data. Use environment variables and secret management outside the repository.
 
-## 25. Current stage
+## 26. Current stage
 
-Stage 9B includes:
+Stage 10C includes:
 
 - repository skeleton and documentation
 - local Docker Compose services for Kafka, Kafka topic initialization, and Kafka UI
@@ -703,6 +756,8 @@ Stage 9B includes:
 - a lightweight GitHub Actions CI workflow for Docker Compose validation, Go and Python tests, safe dbt parse/compile checks, and Airflow DAG syntax/import validation on `develop` and `main`
 - a local PySpark batch-processing foundation with a dedicated `spark-batch` Docker Compose service and a simple smoke job
 - a local PySpark device feature engineering job that reads `data/samples/sample_iot_logs.csv` and writes Parquet output to `data/processed/spark/device_features`
+- integration of that PySpark device feature job into `iot_local_pipeline_dag` through `run_spark_device_features`
+- Airflow-side Spark output validation through `validate_spark_device_features_output`
 - safe local environment placeholders
 
-Airflow now orchestrates the existing local producer, consumer, warehouse loader, and dbt steps through a manual DAG that is safer for repeated demo runs and better documented for local development. Spark is now available as a separate local batch foundation through an on-demand smoke job and a device-level feature engineering job, but it is not yet integrated into Airflow. Spark currently runs only in local Docker mode and does not yet use PostgreSQL as a Spark sink, nor S3, EMR, Glue, Terraform, deployment tooling, or other production infrastructure. Full dbt `run` and `test` execution and full Airflow orchestration are still verified locally through Docker Compose or Airflow, while CI is limited to safe validation checks. AWS, Terraform, deployment, and fuller CD features will be added in later stages.
+Airflow now orchestrates the existing local producer, consumer, warehouse loader, dbt flow, PySpark device feature engineering step, and a simple Spark output existence check through one manual DAG that is safer for repeated demo runs and better documented for local development. Spark still runs only in local Docker mode and the validation step checks output existence only; it does not yet perform deeper data-quality validation or write Spark results into PostgreSQL. The project still does not add S3, EMR, Glue, Terraform, Kubernetes, deployment tooling, or production secrets. Full dbt execution and full Airflow orchestration are still verified locally through Docker Compose or Airflow, while CI remains limited to safe validation checks.
