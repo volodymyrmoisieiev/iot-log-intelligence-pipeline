@@ -10,6 +10,7 @@ This Airflow setup is intentionally local-development only:
 - it adds Kafka reset and warehouse truncate steps for safer repeatable demo runs
 - it generates unique Kafka consumer and loader group ids per Airflow run
 - it runs Spark through the existing local `spark-batch` Docker Compose service in local Docker mode only
+- it uploads Spark device features to local MinIO and validates uploaded objects through the existing local object-storage services
 - it does not add AWS, Terraform, CI/CD, deployment logic, authentication, or real credentials
 - it does not start the Streamlit dashboard from Airflow
 - it uses a small custom Airflow image that adds Docker Compose support for local orchestration
@@ -22,7 +23,7 @@ Stage 7 gives this repository a local orchestration layer so you can:
 - verify Airflow itself with a smoke DAG
 - trigger the existing local data pipeline from the Airflow UI
 - rerun the pipeline more safely for demos by resetting local Kafka runtime state and truncating only the warehouse pipeline tables
-- run the PySpark device feature engineering job after dbt and validate that Parquet output exists
+- run the PySpark device feature engineering job after dbt, validate that Parquet output exists, upload that output to local MinIO, and validate uploaded objects
 
 ## Folder layout
 
@@ -158,6 +159,9 @@ Task order:
 - `run_dbt_test`
 - `run_spark_device_features`
 - `validate_spark_device_features_output`
+- `start_object_storage`
+- `upload_spark_features_to_minio`
+- `validate_minio_spark_features_upload`
 - `finish`
 
 What each orchestration task does:
@@ -172,10 +176,13 @@ What each orchestration task does:
 - `run_dbt_test` executes existing dbt tests
 - `run_spark_device_features` runs `python /app/jobs/device_features_job.py` through `spark-batch`
 - `validate_spark_device_features_output` confirms `data/processed/spark/device_features` exists and contains at least one Parquet file
+- `start_object_storage` starts local MinIO and runs bucket initialization through the `object-storage` Docker Compose profile
+- `upload_spark_features_to_minio` runs the existing `object-storage-uploader` service to upload Spark Parquet output into bucket `iot-data-lake`
+- `validate_minio_spark_features_upload` uses the MinIO client to confirm at least one uploaded `.parquet` object exists under `spark/device_features/latest/`
 
 The Streamlit dashboard is intentionally not started by this DAG.
 Airflow metadata tables are intentionally not truncated or reset by this DAG.
-Spark output remains local Parquet output only and is not yet loaded into PostgreSQL by Airflow.
+Spark output remains local Parquet output that is uploaded into local MinIO only; it is not loaded into PostgreSQL by Airflow and it is not sent to production AWS S3.
 
 ## What repeatable runs reset
 
@@ -223,6 +230,9 @@ Expected successful local result:
 - `dbt test` succeeds with `53` tests
 - `run_spark_device_features` writes Parquet output to `data/processed/spark/device_features`
 - `validate_spark_device_features_output` succeeds after finding at least one Parquet file
+- `start_object_storage` brings up local MinIO and bucket initialization successfully
+- `upload_spark_features_to_minio` uploads Spark Parquet output to `iot-data-lake`
+- `validate_minio_spark_features_upload` succeeds after finding at least one uploaded `.parquet` object under `spark/device_features/latest/`
 
 ## Troubleshooting
 
@@ -273,6 +283,14 @@ docker compose up -d airflow-postgres airflow-init airflow-webserver airflow-sch
 - rerun `docker compose run --build --rm spark-batch python /app/jobs/device_features_job.py` if you need to verify the Spark job independently
 - remember that the validation task checks output existence only, not full data quality
 
+### MinIO upload or validation task fails
+
+- confirm `start_object_storage` succeeded earlier in the same DAG run
+- confirm bucket `iot-data-lake` exists in the MinIO console at [http://localhost:9001](http://localhost:9001/)
+- rerun `docker compose --profile object-storage run --build --rm object-storage-uploader` to verify the uploader independently
+- rerun `docker compose --profile object-storage run --rm --entrypoint /bin/sh minio-init -ec 'mc alias set local "$MINIO_ENDPOINT" "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" && mc ls --recursive local/$MINIO_BUCKET/spark/device_features/latest/'` to verify uploaded objects independently
+- remember that this flow targets local MinIO only, not production AWS S3
+
 ### Kafka offsets or repeated runs are confusing
 
 - Stage 7C uses unique consumer and loader group ids per `run_id`
@@ -318,7 +336,11 @@ Manual UI verification:
 - confirm `run_dbt_test` reports `53` passing tests
 - confirm `run_spark_device_features` succeeds
 - confirm `validate_spark_device_features_output` succeeds
+- confirm `start_object_storage` succeeds
+- confirm `upload_spark_features_to_minio` succeeds
+- confirm `validate_minio_spark_features_upload` succeeds
 - confirm `data/processed/spark/device_features` contains Parquet output
+- confirm MinIO bucket `iot-data-lake` contains uploaded Parquet objects under `spark/device_features/latest/`
 
 ## Stop services
 

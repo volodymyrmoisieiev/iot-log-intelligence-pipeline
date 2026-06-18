@@ -206,6 +206,69 @@ services:
     profiles:
       - spark
 
+  minio:
+    image: minio/minio
+    container_name: iot-minio
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    volumes:
+      - minio_data:/data
+    profiles:
+      - object-storage
+
+  minio-init:
+    image: minio/mc
+    container_name: iot-minio-init
+    depends_on:
+      - minio
+    restart: "no"
+    entrypoint:
+      - /bin/sh
+      - -ec
+    command:
+      - |
+        until mc alias set local "$$MINIO_ENDPOINT" "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"; do
+          echo "Waiting for MinIO..."
+          sleep 2
+        done
+        mc mb --ignore-existing "local/$$MINIO_BUCKET"
+        mc ls "local/$$MINIO_BUCKET"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
+      MINIO_BUCKET: ${MINIO_BUCKET:-iot-data-lake}
+    profiles:
+      - object-storage
+
+  object-storage-uploader:
+    build:
+      context: ./object-storage
+    depends_on:
+      minio:
+        condition: service_started
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_BUCKET: ${MINIO_BUCKET:-iot-data-lake}
+      SPARK_FEATURES_LOCAL_PATH: ${SPARK_FEATURES_CONTAINER_PATH:-/workspace/data/processed/spark/device_features}
+      SPARK_FEATURES_OBJECT_PREFIX: ${SPARK_FEATURES_OBJECT_PREFIX:-spark/device_features/latest}
+    volumes:
+      - type: bind
+        source: ${HOST_PROJECT_ROOT:-.}
+        target: /workspace
+        read_only: true
+    profiles:
+      - object-storage
+
   airflow-postgres:
     image: postgres:16
     container_name: iot-airflow-postgres
@@ -327,3 +390,4 @@ services:
 volumes:
   postgres_data:
   airflow_postgres_data:
+  minio_data:
