@@ -246,6 +246,29 @@ services:
     profiles:
       - object-storage
 
+  object-storage-uploader:
+    build:
+      context: ./object-storage
+    depends_on:
+      minio:
+        condition: service_started
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_BUCKET: ${MINIO_BUCKET:-iot-data-lake}
+      SPARK_FEATURES_LOCAL_PATH: ${SPARK_FEATURES_CONTAINER_PATH:-/workspace/data/processed/spark/device_features}
+      SPARK_FEATURES_OBJECT_PREFIX: ${SPARK_FEATURES_OBJECT_PREFIX:-spark/device_features/latest}
+    volumes:
+      - type: bind
+        source: ${HOST_PROJECT_ROOT:-.}
+        target: /workspace
+        read_only: true
+    profiles:
+      - object-storage
+
   airflow-postgres:
     image: postgres:16
     container_name: iot-airflow-postgres

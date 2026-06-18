@@ -58,11 +58,18 @@ Recommended Stage 11A object-storage screenshots:
 - `minio-bucket-iot-data-lake.png` - bucket browser showing `iot-data-lake`
 - `minio-object-storage-services.png` - terminal output for `docker compose ps` with `iot-minio` visible
 
+Recommended Stage 11B upload screenshots:
+
+- `minio-spark-device-features-prefix.png` - bucket browser showing `spark/device_features/latest/`
+- `object-storage-uploader-success.png` - terminal output for `docker compose --profile object-storage run --build --rm object-storage-uploader`
+- `spark-device-features-local-output.png` - local `data/processed/spark/device_features` folder before upload
+
 Capture suggestions:
 
 - use [http://localhost:9001](http://localhost:9001/) for the MinIO console
 - sign in with `minioadmin / minioadmin`
 - capture screenshots only after `minio-init` completes successfully
+- for Stage 11B, capture the prefix view after a successful upload
 - keep filenames stable so future README references stay easy to maintain
 
 Checklist:

@@ -1,16 +1,19 @@
 # Object Storage
 
-## Stage 11A scope
+## Stage 11A and 11B scope
 
 Stage 11A adds a local S3-compatible object storage foundation through MinIO.
 
-This stage is intentionally limited to local development infrastructure:
+Stage 11B builds on that foundation and adds a local uploader for Spark device-feature Parquet output.
 
-- it uses MinIO, not production AWS S3
-- it creates one local bucket: `iot-data-lake`
-- it does not upload Spark output yet
-- it does not integrate MinIO into Airflow yet
-- it does not add AWS, EMR, Glue, Terraform, Kubernetes, deployment, or secrets
+These stages are intentionally limited to local development infrastructure:
+
+- they use MinIO, not production AWS S3
+- they use one local bucket: `iot-data-lake`
+- they upload Spark output from `data/processed/spark/device_features`
+- they store uploaded files under `spark/device_features/latest/`
+- they do not integrate MinIO into Airflow yet
+- they do not add AWS, EMR, Glue, Terraform, Kubernetes, deployment, or secrets
 
 ## Local endpoints
 
@@ -29,13 +32,18 @@ The repository `.env.example` includes these local placeholders:
 ```env
 MINIO_ROOT_USER=minioadmin
 MINIO_ROOT_PASSWORD=minioadmin
+MINIO_ACCESS_KEY=minioadmin
+MINIO_SECRET_KEY=minioadmin
 MINIO_ENDPOINT=http://minio:9000
 MINIO_BUCKET=iot-data-lake
+SPARK_FEATURES_LOCAL_PATH=data/processed/spark/device_features
+SPARK_FEATURES_CONTAINER_PATH=/workspace/data/processed/spark/device_features
+SPARK_FEATURES_OBJECT_PREFIX=spark/device_features/latest
 ```
 
-`MINIO_ENDPOINT` uses the Docker Compose service hostname so helper containers can reach MinIO inside the Compose network.
+`MINIO_ENDPOINT` uses the Docker Compose service hostname for helper containers inside the Compose network.
 
-## Services added
+## Services and files added
 
 - `minio`
   - image: `minio/minio`
@@ -47,8 +55,25 @@ MINIO_BUCKET=iot-data-lake
   - waits for MinIO to become reachable
   - creates bucket `iot-data-lake`
   - uses idempotent bucket creation so repeated runs stay safe
+- `object-storage-uploader`
+  - builds from `object-storage/Dockerfile`
+  - runs `object-storage/upload_spark_features.py`
+  - uploads `.parquet` files to `iot-data-lake`
+  - uses object prefix `spark/device_features/latest/`
 
 Both services use the Docker Compose profile `object-storage`, which keeps the existing default pipeline startup unchanged unless you explicitly opt in.
+
+## Upload script behavior
+
+The uploader script:
+
+- reads Parquet files from `data/processed/spark/device_features`
+- fails clearly if the folder does not exist
+- fails clearly if no `.parquet` files are found
+- connects to MinIO through the S3-compatible API using `boto3`
+- checks that bucket `iot-data-lake` exists before upload
+- uploads files under `spark/device_features/latest/`
+- prints each uploaded object name and the final upload count
 
 ## How to start MinIO
 
@@ -70,24 +95,52 @@ Check container state:
 docker compose ps
 ```
 
-## How to verify the bucket
+## How to generate Spark output
+
+If the local Parquet output is missing or you want fresh output, run:
+
+```bash
+docker compose run --build --rm spark-batch python /app/jobs/device_features_job.py
+```
+
+Expected local input path:
+
+- `data/processed/spark/device_features`
+
+## How to upload Spark output to MinIO
+
+Run the uploader service:
+
+```bash
+docker compose --profile object-storage run --build --rm object-storage-uploader
+```
+
+Successful uploads target:
+
+- bucket: `iot-data-lake`
+- prefix: `spark/device_features/latest/`
+
+## How to verify uploaded objects
 
 Option 1: MinIO console
 
 - open [http://localhost:9001](http://localhost:9001/)
 - sign in with `minioadmin / minioadmin`
-- confirm bucket `iot-data-lake` exists
+- open bucket `iot-data-lake`
+- confirm objects appear under `spark/device_features/latest/`
 
-Option 2: rerun the idempotent init container
+Option 2: uploader logs
 
-```bash
-docker compose --profile object-storage run --rm minio-init
-```
+- review the printed `Uploaded: s3://...` lines
+- confirm the final uploaded file count
 
-This safely re-applies bucket creation and lists the bucket path, which confirms the bucket still exists.
+Option 3: rerun the uploader safely
+
+- rerunning the uploader overwrites the same object keys in MinIO and should succeed as long as the source Parquet files still exist
 
 ## Notes
 
 - MinIO data is persisted in the named Docker volume `minio_data`
 - repeated `minio-init` runs should not fail if the bucket already exists
-- this stage does not modify the Go producer, Python consumer, warehouse loader, dbt models, Streamlit dashboard, Spark job logic, Airflow DAG logic, or GitHub Actions CI
+- Stage 11B is still a manual local upload step; it is not wired into Airflow yet
+- this is local MinIO only, not real AWS S3

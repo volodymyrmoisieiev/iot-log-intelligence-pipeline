@@ -4,7 +4,7 @@
 
 IoT Log Intelligence Pipeline is a portfolio project focused on end-to-end data engineering for IoT logs: ingestion, processing, storage, transformation, and analytics.
 
-The repository is currently at Stage 11A, with a working local Kafka stack, a Go producer, a Python consumer validation layer, a local PostgreSQL warehouse foundation, a warehouse loader service, dbt staging models, dbt analytics marts on top of PostgreSQL, a polished Streamlit dashboard for local analytics, safer repeatable local Apache Airflow orchestration for the existing pipeline steps, a lightweight GitHub Actions CI workflow for repository validation, tests, dbt project validation, and Airflow DAG validation, a local PySpark batch-processing foundation with a device-level feature engineering job that runs inside the local Airflow pipeline, and a local MinIO-based S3-compatible object storage foundation for future data lake work.
+The repository is currently at Stage 11B, with a working local Kafka stack, a Go producer, a Python consumer validation layer, a local PostgreSQL warehouse foundation, a warehouse loader service, dbt staging models, dbt analytics marts on top of PostgreSQL, a polished Streamlit dashboard for local analytics, safer repeatable local Apache Airflow orchestration for the existing pipeline steps, a lightweight GitHub Actions CI workflow for repository validation, tests, dbt project validation, and Airflow DAG validation, a local PySpark batch-processing foundation with a device-level feature engineering job that runs inside the local Airflow pipeline, a local MinIO-based S3-compatible object storage foundation, and a local uploader that sends Spark device-feature Parquet output into MinIO.
 
 ## 2. Planned local architecture
 
@@ -88,6 +88,7 @@ iot-log-intelligence-pipeline/
 |   `-- environments/
 |       |-- dev/
 |       `-- prod/
+|-- object-storage/
 |-- python-consumer/
 |-- spark/
 |-- storage/postgres/init/
@@ -117,7 +118,8 @@ iot-log-intelligence-pipeline/
 - Stage 9B: batch feature engineering
 - Stage 10: Airflow + PySpark integration
 - Stage 11A: local S3-compatible data lake foundation
-- Stage 11B: AWS + Terraform
+- Stage 11B: Spark device features upload to local MinIO
+- Stage 11C: AWS + Terraform
 - Stage 12: CD + final docs
 
 ## 7. Stage 1 local setup
@@ -785,13 +787,61 @@ What this stage does not do:
 - it does not integrate MinIO into Airflow yet
 - it does not add AWS S3, EMR, Glue, Terraform, Kubernetes, deployment, or secrets
 
-## 26. Security note
+## 26. Stage 11B Spark device features upload to local MinIO
+
+Stage 11B builds on the Stage 11A MinIO foundation and adds a local uploader for Spark device-feature Parquet files. This stage remains local-only and still avoids Airflow integration, production AWS S3, EMR, Glue, Terraform, Kubernetes, deployment, and secrets.
+
+Local Spark input path:
+
+- `data/processed/spark/device_features`
+
+MinIO upload target:
+
+- bucket: `iot-data-lake`
+- object prefix: `spark/device_features/latest/`
+
+Upload script and service:
+
+- script: `object-storage/upload_spark_features.py`
+- Docker Compose service: `object-storage-uploader`
+
+Run Stage 11B verification:
+
+```bash
+docker compose config
+docker compose --profile object-storage up -d minio minio-init
+docker compose run --build --rm spark-batch python /app/jobs/device_features_job.py
+docker compose --profile object-storage run --build --rm object-storage-uploader
+docker compose logs minio-init --tail=20
+```
+
+How to use this stage:
+
+- make sure MinIO is running with `docker compose --profile object-storage up -d minio minio-init`
+- generate fresh Spark Parquet output with `docker compose run --build --rm spark-batch python /app/jobs/device_features_job.py`
+- upload the Parquet files with `docker compose --profile object-storage run --build --rm object-storage-uploader`
+- verify uploaded objects in the MinIO console at [http://localhost:9001](http://localhost:9001/) or through uploader logs
+
+What this stage provides:
+
+- a local `boto3`-based upload script for Spark Parquet artifacts
+- clear failures when the local Spark output folder is missing or empty
+- uploads into `iot-data-lake` under `spark/device_features/latest/`
+- a dedicated Docker Compose service under the `object-storage` profile
+
+What this stage does not do:
+
+- it does not integrate the upload into Airflow yet
+- it does not upload to real AWS S3
+- it does not add EMR, Glue, Terraform, Kubernetes, deployment, or secrets
+
+## 27. Security note
 
 Do not commit real credentials, production secrets, or sensitive data. Use environment variables and secret management outside the repository.
 
-## 27. Current stage
+## 28. Current stage
 
-Stage 11A includes:
+Stage 11B includes:
 
 - repository skeleton and documentation
 - local Docker Compose services for Kafka, Kafka topic initialization, and Kafka UI
@@ -809,6 +859,7 @@ Stage 11A includes:
 - integration of that PySpark device feature job into `iot_local_pipeline_dag` through `run_spark_device_features`
 - Airflow-side Spark output validation through `validate_spark_device_features_output`
 - a local MinIO object storage foundation with S3-compatible API access on port `9000`, a MinIO console on port `9001`, and automatic creation of bucket `iot-data-lake`
+- a local object-storage uploader that sends Spark Parquet files from `data/processed/spark/device_features` into MinIO bucket `iot-data-lake` under prefix `spark/device_features/latest/`
 - safe local environment placeholders
 
-Airflow now orchestrates the existing local producer, consumer, warehouse loader, dbt flow, PySpark device feature engineering step, and a simple Spark output existence check through one manual DAG that is safer for repeated demo runs and better documented for local development. Spark still runs only in local Docker mode and the validation step checks output existence only; it does not yet perform deeper data-quality validation or write Spark results into PostgreSQL. MinIO now provides a local S3-compatible data lake foundation only; Spark output upload and Airflow integration are intentionally deferred. The project still does not add production AWS S3, EMR, Glue, Terraform, Kubernetes, deployment tooling, or production secrets. Full dbt execution and full Airflow orchestration are still verified locally through Docker Compose or Airflow, while CI remains limited to safe validation checks.
+Airflow now orchestrates the existing local producer, consumer, warehouse loader, dbt flow, PySpark device feature engineering step, and a simple Spark output existence check through one manual DAG that is safer for repeated demo runs and better documented for local development. Spark still runs only in local Docker mode and the current MinIO upload is still a manual local step. The validation step checks output existence only, and the uploader sends files into local MinIO only; it does not yet integrate with Airflow or write Spark results into PostgreSQL. The project still does not add production AWS S3, EMR, Glue, Terraform, Kubernetes, deployment tooling, or production secrets. Full dbt execution and full Airflow orchestration are still verified locally through Docker Compose or Airflow, while CI remains limited to safe validation checks.
