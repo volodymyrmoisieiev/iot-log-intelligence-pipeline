@@ -1,0 +1,5 @@
+aws_region   = "eu-central-1"
+project_name = "iot-log-intelligence-pipeline"
+environment  = "dev"
+data_lake_bucket_name    = "iot-log-intelligence-dev-data-lake"
+enable_bucket_versioning = true
