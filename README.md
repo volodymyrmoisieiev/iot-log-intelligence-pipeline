@@ -4,7 +4,7 @@
 
 IoT Log Intelligence Pipeline is a portfolio project focused on end-to-end data engineering for IoT logs: ingestion, processing, storage, transformation, and analytics.
 
-The repository is currently at Stage 12A, with a working local Kafka stack, a Go producer, a Python consumer validation layer, a local PostgreSQL warehouse foundation, a warehouse loader service, dbt staging models, dbt analytics marts on top of PostgreSQL, a polished Streamlit dashboard for local analytics, safer repeatable local Apache Airflow orchestration for the existing pipeline steps, a lightweight GitHub Actions CI workflow for repository validation, tests, dbt project validation, and Airflow DAG validation, a local PySpark batch-processing foundation with a device-level feature engineering job that runs inside the local Airflow pipeline, a local MinIO-based S3-compatible object storage foundation, a local uploader that sends Spark device-feature Parquet output into MinIO, Airflow integration that uploads and validates those MinIO objects as part of the local DAG, and an AWS-ready Terraform foundation for future infrastructure work.
+The repository is currently at Stage 12B, with a working local Kafka stack, a Go producer, a Python consumer validation layer, a local PostgreSQL warehouse foundation, a warehouse loader service, dbt staging models, dbt analytics marts on top of PostgreSQL, a polished Streamlit dashboard for local analytics, safer repeatable local Apache Airflow orchestration for the existing pipeline steps, a lightweight GitHub Actions CI workflow for repository validation, tests, dbt project validation, and Airflow DAG validation, a local PySpark batch-processing foundation with a device-level feature engineering job that runs inside the local Airflow pipeline, a local MinIO-based S3-compatible object storage foundation, a local uploader that sends Spark device-feature Parquet output into MinIO, Airflow integration that uploads and validates those MinIO objects as part of the local DAG, an AWS-ready Terraform foundation, and Terraform S3 data lake definitions for future AWS storage.
 
 ## 2. Planned local architecture
 
@@ -884,26 +884,27 @@ What this stage does not do:
 - it does not add EMR, Glue, Terraform, Kubernetes, deployment, or secrets
 - it does not change the Spark job logic itself
 
-## 28. Stage 12A Terraform AWS infrastructure foundation
+## 28. Stage 12B Terraform AWS S3 data lake resources
 
-Stage 12A adds a Terraform AWS foundation under `infra/terraform/aws/`. This stage is intentionally limited to an AWS-ready infrastructure structure only: Terraform version constraints, AWS provider configuration, shared variables, baseline tags, example tfvars, and documentation for future cloud work.
+Stage 12B builds on the Terraform AWS foundation under `infra/terraform/aws/` and adds Terraform definitions for a future AWS S3 data lake bucket. This stage maps the local MinIO data lake pattern to an AWS-ready S3 structure for later Spark and Parquet outputs.
 
 What this stage provides:
 
 - a dedicated Terraform root module for future AWS infrastructure
 - variable-driven AWS provider configuration
-- shared inputs for `aws_region`, `project_name`, and `environment`
-- baseline default tags for future AWS resources
-- safe documentation for `terraform fmt`, `terraform init`, `terraform validate`, and `terraform plan`
+- shared inputs for `aws_region`, `project_name`, `environment`, and `data_lake_bucket_name`
+- an AWS S3 data lake bucket definition with versioning, server-side encryption, public access blocking, and ownership controls
+- documented logical prefixes for future lake paths such as `raw/`, `processed/`, and `spark/device_features/latest/`
+- safe documentation for `terraform fmt`, `terraform init`, `terraform validate`, and credential-aware `terraform plan`
 
 What this stage does not do:
 
-- it does not create any AWS resources yet
-- it does not create any S3 buckets or data lake resources yet
-- it does not run `terraform apply`
+- it does not create any AWS resources until `terraform apply` is run
+- it does not upload any real data objects into S3 yet
+- it does not run `terraform apply` in this stage
 - it does not modify the local application services or pipeline behavior
 
-Real AWS S3 and broader data lake infrastructure will be added in later stages.
+AWS credentials are required only for real Terraform plan or apply workflows against AWS. The S3 bucket is intended for future Spark and Parquet outputs after later stages extend the cloud data lake flow.
 
 ## 29. Security note
 
@@ -911,7 +912,7 @@ Do not commit real credentials, production secrets, or sensitive data. Use envir
 
 ## 30. Current stage
 
-Stage 12A includes:
+Stage 12B includes:
 
 - repository skeleton and documentation
 - local Docker Compose services for Kafka, Kafka topic initialization, and Kafka UI
@@ -932,6 +933,7 @@ Stage 12A includes:
 - a local object-storage uploader that sends Spark Parquet files from `data/processed/spark/device_features` into MinIO bucket `iot-data-lake` under prefix `spark/device_features/latest/`
 - Airflow tasks that start local object storage, upload Spark Parquet files to MinIO, and validate uploaded `.parquet` objects in the bucket
 - an AWS-ready Terraform foundation under `infra/terraform/aws/` with provider configuration, shared variables, baseline tags, and safe example inputs
+- Terraform definitions for an AWS S3 data lake bucket with versioning, server-side encryption, ownership controls, and public access blocking
 - safe local environment placeholders
 
-Airflow now orchestrates the existing local producer, consumer, warehouse loader, dbt flow, PySpark device feature engineering step, local Spark output validation, local MinIO upload, and MinIO object validation through one manual DAG that is safer for repeated demo runs and better documented for local development. Spark still runs only in local Docker mode, and MinIO remains a local S3-compatible target only rather than production AWS S3. Stage 12A adds only the Terraform AWS foundation, so no real AWS resources are created and no `terraform apply` is run in this repository stage. Real AWS S3 and broader data lake infrastructure will be added later. Full dbt execution and full Airflow orchestration are still verified locally through Docker Compose or Airflow, while CI remains limited to safe validation checks.
+Airflow now orchestrates the existing local producer, consumer, warehouse loader, dbt flow, PySpark device feature engineering step, local Spark output validation, local MinIO upload, and MinIO object validation through one manual DAG that is safer for repeated demo runs and better documented for local development. Spark still runs only in local Docker mode, and MinIO remains a local S3-compatible target only rather than production AWS S3. Stage 12B adds Terraform S3 data lake definitions that mirror the local MinIO pattern for future AWS use, but no AWS resources are created until `terraform apply` is run, and `terraform apply` should not be run yet. Full dbt execution and full Airflow orchestration are still verified locally through Docker Compose or Airflow, while CI remains limited to safe validation checks.
