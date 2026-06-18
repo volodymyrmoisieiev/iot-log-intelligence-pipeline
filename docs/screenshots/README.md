@@ -50,6 +50,21 @@ Recommended Stage 10 verification artifacts:
 - screenshot or terminal output showing at least one `part-*.parquet` file
 - optional screenshot of the Airflow graph or grid after the validation task succeeds
 
+## MinIO screenshots checklist
+
+Recommended Stage 11A object-storage screenshots:
+
+- `minio-console-home.png` - MinIO console landing page on port `9001`
+- `minio-bucket-iot-data-lake.png` - bucket browser showing `iot-data-lake`
+- `minio-object-storage-services.png` - terminal output for `docker compose ps` with `iot-minio` visible
+
+Capture suggestions:
+
+- use [http://localhost:9001](http://localhost:9001/) for the MinIO console
+- sign in with `minioadmin / minioadmin`
+- capture screenshots only after `minio-init` completes successfully
+- keep filenames stable so future README references stay easy to maintain
+
 Checklist:
 
 - confirm the smoke job completes successfully
