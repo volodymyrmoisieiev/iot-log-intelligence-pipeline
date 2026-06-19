@@ -954,6 +954,8 @@ dbt test --project-dir .\dbt --profiles-dir .\dbt --target snowflake
 
 Placeholder values such as `your_snowflake_account` are examples only. `dbt parse` is the safe local validation step for that placeholder setup, while real Snowflake connection checks through `dbt debug`, `dbt run`, and `dbt test` are expected to fail until valid credentials and account-specific values are provided through environment variables.
 
+For the full Snowflake dbt runbook, troubleshooting notes, and safety guidance, see [docs/snowflake.md](docs/snowflake.md).
+
 What this stage does not do:
 
 - it does not remove or replace the PostgreSQL target

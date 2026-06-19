@@ -35,6 +35,8 @@ If you want to run dbt directly from a local Windows Python environment instead 
 
 The `snowflake` target is included as a safe template for future cloud warehouse work. It is optional, it is not used by default, and CI does not require a real Snowflake connection.
 
+For the full Snowflake runbook, troubleshooting notes, and safety guidance, see [docs/snowflake.md](../docs/snowflake.md).
+
 Required environment variables for the Snowflake target:
 
 - `SNOWFLAKE_ACCOUNT`
