@@ -4,7 +4,7 @@
 
 IoT Log Intelligence Pipeline is a portfolio project focused on end-to-end data engineering for IoT logs: ingestion, processing, storage, transformation, and analytics.
 
-The repository is currently at Stage 12C, with a working local Kafka stack, a Go producer, a Python consumer validation layer, a local PostgreSQL warehouse foundation, a warehouse loader service, dbt staging models, dbt analytics marts on top of PostgreSQL, a polished Streamlit dashboard for local analytics, safer repeatable local Apache Airflow orchestration for the existing pipeline steps, a lightweight GitHub Actions CI workflow for repository validation, tests, dbt project validation, Airflow DAG validation, and Terraform validation, a local PySpark batch-processing foundation with a device-level feature engineering job that runs inside the local Airflow pipeline, a local MinIO-based S3-compatible object storage foundation, a local uploader that sends Spark device-feature Parquet output into MinIO, Airflow integration that uploads and validates those MinIO objects as part of the local DAG, an AWS-ready Terraform foundation, and Terraform S3 data lake definitions for future AWS storage.
+The repository is currently at Stage 13A, with a working local Kafka stack, a Go producer, a Python consumer validation layer, a local PostgreSQL warehouse foundation, a warehouse loader service, dbt staging models, dbt analytics marts on top of PostgreSQL, an optional Snowflake-ready dbt target for future cloud warehouse integration, a polished Streamlit dashboard for local analytics, safer repeatable local Apache Airflow orchestration for the existing pipeline steps, a lightweight GitHub Actions CI workflow for repository validation, tests, dbt project validation, Airflow DAG validation, and Terraform validation, a local PySpark batch-processing foundation with a device-level feature engineering job that runs inside the local Airflow pipeline, a local MinIO-based S3-compatible object storage foundation, a local uploader that sends Spark device-feature Parquet output into MinIO, Airflow integration that uploads and validates those MinIO objects as part of the local DAG, an AWS-ready Terraform foundation, and Terraform S3 data lake definitions for future AWS storage.
 
 ## 2. Planned local architecture
 
@@ -912,13 +912,62 @@ What this stage does not do:
 
 AWS credentials are not required for CI validation because Terraform initialization runs with `-backend=false` and validation checks syntax and provider configuration only. AWS credentials are required only for real Terraform plan or apply workflows against AWS. The S3 bucket is intended for future Spark and Parquet outputs after later stages extend the cloud data lake flow.
 
-## 29. Security note
+## 29. Stage 13A Snowflake dbt target foundation
+
+Stage 13A keeps PostgreSQL as the default local dbt warehouse target and adds an optional Snowflake-ready profile target for future cloud warehouse integration. The Snowflake configuration is environment-variable-driven only, includes placeholder values only, and does not introduce any real credentials, mandatory cloud dependencies, or CI requirements for a live Snowflake connection.
+
+What this stage provides:
+
+- the existing local PostgreSQL dbt workflow remains the default path
+- an optional `snowflake` dbt target under `dbt/profiles.yml`
+- Snowflake placeholder environment variables in `.env.example`
+- an optional `dbt/requirements-snowflake.txt` dependency file for the Snowflake adapter
+- documentation for `dbt debug`, `dbt run`, and `dbt test` with the Snowflake target
+
+Recommended local PostgreSQL dbt validation stays Docker-based:
+
+```powershell
+docker compose run --build --rm dbt dbt debug
+docker compose run --build --rm dbt dbt run
+docker compose run --build --rm dbt dbt test
+```
+
+Local Windows dbt note:
+
+- if you run dbt directly from a local Python environment, PostgreSQL commands need `dbt-postgres`
+- Snowflake commands need `dbt-snowflake`
+- if you want both targets locally in one Python environment, install both adapters
+
+Safe repository-root Snowflake syntax/config validation with placeholder values:
+
+```powershell
+dbt parse --project-dir .\dbt --profiles-dir .\dbt --target snowflake
+```
+
+Snowflake commands below are only for real credentials:
+
+```powershell
+dbt debug --project-dir .\dbt --profiles-dir .\dbt --target snowflake
+dbt run --project-dir .\dbt --profiles-dir .\dbt --target snowflake
+dbt test --project-dir .\dbt --profiles-dir .\dbt --target snowflake
+```
+
+Placeholder values such as `your_snowflake_account` are examples only. `dbt parse` is the safe local validation step for that placeholder setup, while real Snowflake connection checks through `dbt debug`, `dbt run`, and `dbt test` are expected to fail until valid credentials and account-specific values are provided through environment variables.
+
+What this stage does not do:
+
+- it does not remove or replace the PostgreSQL target
+- it does not commit real Snowflake credentials or account identifiers
+- it does not require Snowflake connectivity in CI
+- it does not run Terraform apply or any cloud deployment command
+
+## 30. Security note
 
 Do not commit real credentials, production secrets, or sensitive data. Use environment variables and secret management outside the repository.
 
-## 30. Current stage
+## 31. Current stage
 
-Stage 12C includes:
+Stage 13A includes:
 
 - repository skeleton and documentation
 - local Docker Compose services for Kafka, Kafka topic initialization, and Kafka UI
@@ -926,7 +975,7 @@ Stage 12C includes:
 - a Python consumer that validates and routes records to processed and invalid Kafka topics
 - a local PostgreSQL foundation with automatic table initialization for processed and invalid IoT logs
 - a warehouse loader that consumes processed and invalid Kafka topics and writes to PostgreSQL
-- a dbt project with PostgreSQL sources, staging tables, and baseline tests
+- a dbt project with PostgreSQL sources, staging tables, baseline tests, and an optional Snowflake-ready target template
 - analytics marts for device risk, attack summary, protocol metrics, and pipeline quality
 - a polished Streamlit dashboard with KPI cards, filters, charts, mart tables, and portfolio-ready UX guidance
 - a local Apache Airflow foundation with a separate metadata database, webserver, scheduler, smoke DAG, safer repeatable local orchestration DAG, and polished local documentation
@@ -942,5 +991,6 @@ Stage 12C includes:
 - Terraform definitions for an AWS S3 data lake bucket with versioning, server-side encryption, ownership controls, and public access blocking
 - GitHub Actions validation for Terraform formatting, backend-free initialization, and config validation without AWS credentials
 - safe local environment placeholders
+- optional Snowflake environment placeholders for future cloud warehouse work
 
 Airflow now orchestrates the existing local producer, consumer, warehouse loader, dbt flow, PySpark device feature engineering step, local Spark output validation, local MinIO upload, and MinIO object validation through one manual DAG that is safer for repeated demo runs and better documented for local development. Spark still runs only in local Docker mode, and MinIO remains a local S3-compatible target only rather than production AWS S3. Stage 12C keeps the Terraform S3 data lake definitions that mirror the local MinIO pattern for future AWS use and adds CI validation for them, but no AWS resources are created until `terraform apply` is run, and neither `terraform plan` nor `terraform apply` is part of CI. Full dbt execution and full Airflow orchestration are still verified locally through Docker Compose or Airflow, while CI remains limited to safe validation checks.
