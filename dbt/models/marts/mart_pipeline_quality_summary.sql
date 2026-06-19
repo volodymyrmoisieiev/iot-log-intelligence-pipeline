@@ -19,11 +19,12 @@ select
         when (processed_summary.processed_records + invalid_summary.invalid_records) = 0 then 0
         else round(
             (
-                invalid_summary.invalid_records::numeric
-                / nullif(
-                    processed_summary.processed_records + invalid_summary.invalid_records,
-                    0
-                )
+                {{
+                    safe_divide(
+                        'invalid_summary.invalid_records',
+                        'processed_summary.processed_records + invalid_summary.invalid_records'
+                    )
+                }}
             ),
             4
         )

@@ -5,8 +5,8 @@ with source_data as (
 select
     id,
     event_timestamp,
-    (event_timestamp at time zone 'UTC')::date as event_date,
-    extract(hour from event_timestamp at time zone 'UTC')::integer as event_hour,
+    {{ to_utc_date('event_timestamp') }} as event_date,
+    {{ extract_utc_hour('event_timestamp') }} as event_hour,
     trim(device_id) as device_id,
     trim(source_ip) as source_ip,
     trim(destination_ip) as destination_ip,

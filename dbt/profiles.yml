@@ -11,3 +11,14 @@ analytics:
       schema: public
       threads: 4
       connect_timeout: 10
+    snowflake:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT', 'your_snowflake_account') }}"
+      user: "{{ env_var('SNOWFLAKE_USER', 'your_snowflake_user') }}"
+      password: "{{ env_var('SNOWFLAKE_PASSWORD', 'your_snowflake_password') }}"
+      role: "{{ env_var('SNOWFLAKE_ROLE', 'your_snowflake_role') }}"
+      database: "{{ env_var('SNOWFLAKE_DATABASE', 'your_snowflake_database') }}"
+      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', 'your_snowflake_warehouse') }}"
+      schema: "{{ env_var('SNOWFLAKE_SCHEMA', 'PUBLIC') }}"
+      threads: "{{ env_var('SNOWFLAKE_THREADS', '4') | int }}"
+      client_session_keep_alive: false
