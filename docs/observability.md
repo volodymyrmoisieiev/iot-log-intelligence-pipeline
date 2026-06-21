@@ -1,6 +1,6 @@
 # Observability foundation
 
-Stage 14A adds only the PostgreSQL schema foundation for pipeline observability. It does not change Airflow DAG behavior, dbt model logic, Kafka topics, dashboard behavior, or Terraform execution.
+Stage 14B builds on the Stage 14A PostgreSQL schema foundation and adds a local Python observability writer. It still does not change Airflow DAG behavior, dbt model logic, Kafka topics, dashboard behavior, or Terraform execution.
 
 ## What these tables are for
 
@@ -20,14 +20,50 @@ Stage 14A adds [`storage/postgres/init/002_create_observability_tables.sql`](../
 
 ## How this fits Stage 14
 
-Stage 14 is about observability and data-quality alerting. Stage 14A intentionally stops at the database layer so later work can write audit rows, quality-check results, and alerts without first changing pipeline execution code.
+Stage 14 is about observability and data-quality alerting.
 
-This stage does not yet add:
+- Stage 14A adds the additive PostgreSQL observability tables.
+- Stage 14B adds a local Python writer that reads warehouse counts from `processed_iot_logs` and `invalid_iot_logs`, calculates `invalid_rate`, and writes audit rows, quality checks, and alerts.
+
+Stage 14B still does not add:
 
 - a quality monitor service
 - Kafka alert publishing logic
 - Airflow DAG changes
 - dashboard changes
+
+## Local writer
+
+The Stage 14B writer lives at [`observability/write_pipeline_observability.py`](../observability/write_pipeline_observability.py).
+
+It reads PostgreSQL connection settings from environment variables with local defaults:
+
+- `POSTGRES_HOST=localhost`
+- `POSTGRES_PORT=5432`
+- `POSTGRES_DB=iot_logs`
+- `POSTGRES_USER=iot_user`
+- `POSTGRES_PASSWORD=iot_password`
+
+CLI arguments:
+
+- `--run-id` required
+- `--pipeline-name` default `iot_local_pipeline`
+- `--environment` default `local`
+- `--invalid-rate-threshold` default `0.20`
+- `--min-processed-records` default `1`
+
+Writer behavior:
+
+- inspects required PostgreSQL table schemas before writing
+- counts rows in `processed_iot_logs`
+- counts rows in `invalid_iot_logs`
+- calculates `invalid_rate = invalid_records / (processed_records + invalid_records)`
+- writes one `pipeline_run_audit` row per `run_id`
+- rewrites `pipeline_quality_checks` rows for the same `run_id`
+- rewrites `pipeline_alerts` rows for the same `run_id`
+- uses one transaction and rolls back everything on failure
+
+Stage 14B currently stores `high_risk_devices` as `0` because this writer only reads the already-established warehouse row counts and invalid-rate metric. Later observability stages can expand that metric when a concrete warehouse rule is defined.
 
 ## Apply to an existing local PostgreSQL volume
 
@@ -63,16 +99,40 @@ Apply the observability SQL file to an existing running volume if needed:
 docker exec -e PGPASSWORD=iot_password -i iot-postgres psql -v ON_ERROR_STOP=1 -U iot_user -d iot_logs -f /docker-entrypoint-initdb.d/002_create_observability_tables.sql
 ```
 
+Install the local writer dependency:
+
+```powershell
+python -m pip install -r .\observability\requirements.txt
+```
+
+Run the writer:
+
+```powershell
+python .\observability\write_pipeline_observability.py --run-id stage14b-validation
+```
+
 Verify both the new observability tables and the existing warehouse tables:
 
 ```powershell
 docker exec -e PGPASSWORD=iot_password -i iot-postgres psql -U iot_user -d iot_logs -P pager=off -c "SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename IN ('processed_iot_logs', 'invalid_iot_logs', 'pipeline_run_audit', 'pipeline_quality_checks', 'pipeline_alerts') ORDER BY tablename;"
 ```
 
-Optional smoke-test inserts:
+Inspect the observability rows written for one run id:
 
 ```powershell
-docker exec -e PGPASSWORD=iot_password -i iot-postgres psql -v ON_ERROR_STOP=1 -U iot_user -d iot_logs -c "INSERT INTO pipeline_run_audit (run_id, pipeline_name, environment, started_at, finished_at, status, processed_records, invalid_records, invalid_rate, high_risk_devices, total_alerts) VALUES ('stage14a-doc-test', 'iot_local_pipeline', 'local', NOW(), NOW(), 'success', 10, 1, 0.100000, 2, 1); INSERT INTO pipeline_quality_checks (run_id, check_name, check_status, severity, metric_name, metric_value, threshold_value, message) VALUES ('stage14a-doc-test', 'invalid_rate_threshold', 'pass', 'low', 'invalid_rate', 0.100000, 0.200000, 'Documentation validation row.'); INSERT INTO pipeline_alerts (run_id, alert_type, alert_level, alert_message, source, is_published_to_kafka) VALUES ('stage14a-doc-test', 'quality_threshold', 'info', 'Documentation validation row.', 'manual_validation', FALSE);"
-docker exec -e PGPASSWORD=iot_password -i iot-postgres psql -U iot_user -d iot_logs -P pager=off -c "SELECT run_id, status, processed_records, invalid_records FROM pipeline_run_audit WHERE run_id = 'stage14a-doc-test'; SELECT run_id, check_name, check_status, severity FROM pipeline_quality_checks WHERE run_id = 'stage14a-doc-test'; SELECT run_id, alert_type, alert_level, is_published_to_kafka FROM pipeline_alerts WHERE run_id = 'stage14a-doc-test';"
-docker exec -e PGPASSWORD=iot_password -i iot-postgres psql -v ON_ERROR_STOP=1 -U iot_user -d iot_logs -c "DELETE FROM pipeline_alerts WHERE run_id = 'stage14a-doc-test'; DELETE FROM pipeline_quality_checks WHERE run_id = 'stage14a-doc-test'; DELETE FROM pipeline_run_audit WHERE run_id = 'stage14a-doc-test';"
+docker exec -e PGPASSWORD=iot_password -i iot-postgres psql -U iot_user -d iot_logs -P pager=off -c "SELECT run_id, status, processed_records, invalid_records, invalid_rate, total_alerts FROM pipeline_run_audit WHERE run_id = 'stage14b-validation'; SELECT run_id, check_name, check_status, severity, metric_name, metric_value, threshold_value FROM pipeline_quality_checks WHERE run_id = 'stage14b-validation' ORDER BY check_name; SELECT run_id, alert_type, alert_level, is_published_to_kafka FROM pipeline_alerts WHERE run_id = 'stage14b-validation' ORDER BY alert_type;"
+```
+
+Run the writer again with the same run id to prove idempotency:
+
+```powershell
+python .\observability\write_pipeline_observability.py --run-id stage14b-validation
+docker exec -e PGPASSWORD=iot_password -i iot-postgres psql -U iot_user -d iot_logs -P pager=off -c "SELECT COUNT(*) AS audit_rows FROM pipeline_run_audit WHERE run_id = 'stage14b-validation'; SELECT COUNT(*) AS quality_rows FROM pipeline_quality_checks WHERE run_id = 'stage14b-validation';"
+```
+
+Clean up validation rows:
+
+```powershell
+docker exec -e PGPASSWORD=iot_password -i iot-postgres psql -v ON_ERROR_STOP=1 -U iot_user -d iot_logs -c "DELETE FROM pipeline_alerts WHERE run_id = 'stage14b-validation'; DELETE FROM pipeline_quality_checks WHERE run_id = 'stage14b-validation'; DELETE FROM pipeline_run_audit WHERE run_id = 'stage14b-validation';"
+docker exec -e PGPASSWORD=iot_password -i iot-postgres psql -U iot_user -d iot_logs -P pager=off -c "SELECT COUNT(*) AS audit_rows FROM pipeline_run_audit WHERE run_id = 'stage14b-validation'; SELECT COUNT(*) AS quality_rows FROM pipeline_quality_checks WHERE run_id = 'stage14b-validation'; SELECT COUNT(*) AS alert_rows FROM pipeline_alerts WHERE run_id = 'stage14b-validation';"
 ```
