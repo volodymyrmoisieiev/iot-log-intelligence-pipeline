@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 
 import psycopg
+from confluent_kafka import Producer
 
 
 DEFAULT_POSTGRES_HOST = "localhost"
@@ -18,6 +21,8 @@ DEFAULT_PIPELINE_NAME = "iot_local_pipeline"
 DEFAULT_ENVIRONMENT = "local"
 DEFAULT_INVALID_RATE_THRESHOLD = Decimal("0.20")
 DEFAULT_MIN_PROCESSED_RECORDS = 1
+DEFAULT_KAFKA_BOOTSTRAP_SERVERS = "localhost:29092"
+DEFAULT_KAFKA_ALERT_TOPIC = "iot_pipeline_alerts"
 DECIMAL_SCALE = Decimal("0.000001")
 
 
@@ -80,6 +85,9 @@ class WriterConfig:
     environment: str
     invalid_rate_threshold: Decimal
     min_processed_records: int
+    publish_alerts: bool
+    kafka_bootstrap_servers: str
+    kafka_alert_topic: str
 
 
 @dataclass(frozen=True)
@@ -106,6 +114,7 @@ class AlertRecord:
     alert_type: str
     alert_level: str
     alert_message: str
+    created_at: datetime
     source: str = "observability_writer"
     is_published_to_kafka: bool = False
 
@@ -137,6 +146,21 @@ def parse_args() -> WriterConfig:
         type=parse_non_negative_int,
         help="Minimum processed_iot_logs row count required for a passing check. Default: 1",
     )
+    parser.add_argument(
+        "--publish-alerts",
+        action="store_true",
+        help="Publish generated alerts to Kafka topic iot_pipeline_alerts and mark rows as published on success.",
+    )
+    parser.add_argument(
+        "--kafka-bootstrap-servers",
+        default=os.getenv("KAFKA_BOOTSTRAP_SERVERS", DEFAULT_KAFKA_BOOTSTRAP_SERVERS),
+        help=f"Kafka bootstrap servers. Default: {DEFAULT_KAFKA_BOOTSTRAP_SERVERS}",
+    )
+    parser.add_argument(
+        "--kafka-alert-topic",
+        default=os.getenv("KAFKA_ALERT_TOPIC", DEFAULT_KAFKA_ALERT_TOPIC),
+        help=f"Kafka alert topic. Default: {DEFAULT_KAFKA_ALERT_TOPIC}",
+    )
     args = parser.parse_args()
 
     return WriterConfig(
@@ -145,6 +169,9 @@ def parse_args() -> WriterConfig:
         environment=args.environment.strip(),
         invalid_rate_threshold=args.invalid_rate_threshold,
         min_processed_records=args.min_processed_records,
+        publish_alerts=args.publish_alerts,
+        kafka_bootstrap_servers=args.kafka_bootstrap_servers.strip(),
+        kafka_alert_topic=args.kafka_alert_topic.strip(),
     )
 
 
@@ -165,6 +192,7 @@ def main() -> None:
 
     database_config = load_database_config()
     started_at = datetime.now(timezone.utc)
+    alerts: list[AlertRecord] = []
 
     with psycopg.connect(
         host=database_config.host,
@@ -195,6 +223,15 @@ def main() -> None:
                 replace_quality_checks(cursor=cursor, run_id=config.run_id, checks=quality_checks)
                 replace_alerts(cursor=cursor, run_id=config.run_id, alerts=alerts)
 
+    alerts_published_to_kafka = False
+    if config.publish_alerts and alerts:
+        publish_alerts_to_kafka(config=config, metrics=metrics, alerts=alerts)
+        mark_alerts_as_published(
+            database_config=database_config,
+            run_id=config.run_id,
+        )
+        alerts_published_to_kafka = True
+
     print(f"run_id={config.run_id}")
     print(f"pipeline_name={config.pipeline_name}")
     print(f"environment={config.environment}")
@@ -203,6 +240,8 @@ def main() -> None:
     print(f"invalid_rate={format_decimal(metrics.invalid_rate)}")
     print(f"quality_checks={len(quality_checks)}")
     print(f"alerts={len(alerts)}")
+    print(f"publish_alerts={config.publish_alerts}")
+    print(f"alerts_published_to_kafka={alerts_published_to_kafka}")
 
 
 def validate_writer_config(config: WriterConfig) -> None:
@@ -212,6 +251,10 @@ def validate_writer_config(config: WriterConfig) -> None:
         raise ValueError("--pipeline-name cannot be empty")
     if not config.environment:
         raise ValueError("--environment cannot be empty")
+    if config.publish_alerts and not config.kafka_bootstrap_servers:
+        raise ValueError("--kafka-bootstrap-servers cannot be empty when --publish-alerts is used")
+    if config.publish_alerts and not config.kafka_alert_topic:
+        raise ValueError("--kafka-alert-topic cannot be empty when --publish-alerts is used")
 
 
 def validate_schema(cursor: psycopg.Cursor) -> None:
@@ -312,6 +355,7 @@ def build_alerts(quality_checks: list[QualityCheck]) -> list[AlertRecord]:
                 alert_type=check.check_name,
                 alert_level=alert_level,
                 alert_message=check.message,
+                created_at=datetime.now(timezone.utc),
             )
         )
 
@@ -464,9 +508,10 @@ def replace_alerts(
             alert_level,
             alert_message,
             source,
-            is_published_to_kafka
+            is_published_to_kafka,
+            created_at
         )
-        VALUES (%s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
         """,
         [
             (
@@ -476,10 +521,100 @@ def replace_alerts(
                 alert.alert_message,
                 alert.source,
                 alert.is_published_to_kafka,
+                alert.created_at,
             )
             for alert in alerts
         ],
     )
+
+
+def publish_alerts_to_kafka(
+    config: WriterConfig,
+    metrics: PipelineMetrics,
+    alerts: list[AlertRecord],
+) -> None:
+    producer = Producer({"bootstrap.servers": config.kafka_bootstrap_servers})
+    delivery_errors: list[str] = []
+
+    def delivery_report(error: object, _message: object) -> None:
+        if error is not None:
+            delivery_errors.append(str(error))
+
+    try:
+        for alert in alerts:
+            payload = build_alert_payload(
+                config=config,
+                metrics=metrics,
+                alert=alert,
+            )
+            producer.produce(
+                topic=config.kafka_alert_topic,
+                value=json.dumps(payload).encode("utf-8"),
+                callback=delivery_report,
+            )
+            producer.poll(0)
+
+        remaining_messages = producer.flush(timeout=10)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Kafka alert publishing failed for run_id '{config.run_id}': {exc}"
+        ) from exc
+
+    if delivery_errors:
+        joined_errors = "; ".join(delivery_errors)
+        raise RuntimeError(
+            f"Kafka alert publishing failed for run_id '{config.run_id}': {joined_errors}"
+        )
+
+    if remaining_messages != 0:
+        raise RuntimeError(
+            f"Kafka alert publishing failed for run_id '{config.run_id}': "
+            f"{remaining_messages} message(s) were not delivered before flush timeout."
+        )
+
+
+def build_alert_payload(
+    config: WriterConfig,
+    metrics: PipelineMetrics,
+    alert: AlertRecord,
+) -> dict[str, str | int | float | bool]:
+    return {
+        "run_id": config.run_id,
+        "pipeline_name": config.pipeline_name,
+        "environment": config.environment,
+        "alert_type": alert.alert_type,
+        "alert_level": alert.alert_level,
+        "alert_message": alert.alert_message,
+        "source": alert.source,
+        "processed_records": metrics.processed_records,
+        "invalid_records": metrics.invalid_records,
+        "invalid_rate": float(quantize_decimal(metrics.invalid_rate)),
+        "created_at": alert.created_at.isoformat(),
+    }
+
+
+def mark_alerts_as_published(
+    database_config: DatabaseConfig,
+    run_id: str,
+) -> None:
+    with psycopg.connect(
+        host=database_config.host,
+        port=database_config.port,
+        dbname=database_config.database,
+        user=database_config.user,
+        password=database_config.password,
+        connect_timeout=10,
+    ) as connection:
+        with connection.transaction():
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE pipeline_alerts
+                    SET is_published_to_kafka = TRUE
+                    WHERE run_id = %s
+                    """,
+                    (run_id,),
+                )
 
 
 def parse_decimal(raw_value: str) -> Decimal:
@@ -522,4 +657,8 @@ def format_decimal(value: Decimal) -> str:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exc:  # noqa: BLE001
+        print(f"ERROR: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc

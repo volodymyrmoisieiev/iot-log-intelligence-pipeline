@@ -1,6 +1,6 @@
 # Observability foundation
 
-Stage 14B builds on the Stage 14A PostgreSQL schema foundation and adds a local Python observability writer. It still does not change Airflow DAG behavior, dbt model logic, Kafka topics, dashboard behavior, or Terraform execution.
+Stage 14C builds on the Stage 14A PostgreSQL schema foundation and Stage 14B local writer. It adds optional Kafka publishing for generated observability alerts while still leaving Airflow DAG behavior, dbt model logic, dashboard behavior, and Terraform execution unchanged.
 
 ## What these tables are for
 
@@ -24,17 +24,17 @@ Stage 14 is about observability and data-quality alerting.
 
 - Stage 14A adds the additive PostgreSQL observability tables.
 - Stage 14B adds a local Python writer that reads warehouse counts from `processed_iot_logs` and `invalid_iot_logs`, calculates `invalid_rate`, and writes audit rows, quality checks, and alerts.
+- Stage 14C adds optional publishing of generated alert rows to Kafka topic `iot_pipeline_alerts`.
 
-Stage 14B still does not add:
+Stage 14C still does not add:
 
 - a quality monitor service
-- Kafka alert publishing logic
 - Airflow DAG changes
 - dashboard changes
 
 ## Local writer
 
-The Stage 14B writer lives at [`observability/write_pipeline_observability.py`](../observability/write_pipeline_observability.py).
+The Stage 14 writer lives at [`observability/write_pipeline_observability.py`](../observability/write_pipeline_observability.py).
 
 It reads PostgreSQL connection settings from environment variables with local defaults:
 
@@ -43,6 +43,8 @@ It reads PostgreSQL connection settings from environment variables with local de
 - `POSTGRES_DB=iot_logs`
 - `POSTGRES_USER=iot_user`
 - `POSTGRES_PASSWORD=iot_password`
+- `KAFKA_BOOTSTRAP_SERVERS=localhost:29092`
+- `KAFKA_ALERT_TOPIC=iot_pipeline_alerts`
 
 CLI arguments:
 
@@ -51,6 +53,9 @@ CLI arguments:
 - `--environment` default `local`
 - `--invalid-rate-threshold` default `0.20`
 - `--min-processed-records` default `1`
+- `--publish-alerts` optional
+- `--kafka-bootstrap-servers` optional override for `KAFKA_BOOTSTRAP_SERVERS`
+- `--kafka-alert-topic` optional override for `KAFKA_ALERT_TOPIC`
 
 Writer behavior:
 
@@ -61,9 +66,16 @@ Writer behavior:
 - writes one `pipeline_run_audit` row per `run_id`
 - rewrites `pipeline_quality_checks` rows for the same `run_id`
 - rewrites `pipeline_alerts` rows for the same `run_id`
+- keeps `pipeline_alerts.is_published_to_kafka = false` unless Kafka publishing succeeds
+- optionally publishes generated alerts to Kafka as JSON when `--publish-alerts` is used
 - uses one transaction and rolls back everything on failure
 
 Stage 14B currently stores `high_risk_devices` as `0` because this writer only reads the already-established warehouse row counts and invalid-rate metric. Later observability stages can expand that metric when a concrete warehouse rule is defined.
+
+Kafka publishing note:
+
+- PostgreSQL rows remain idempotent for the same `run_id`
+- Kafka is append-only, so repeated validation with `--publish-alerts` can produce additional topic messages even when the database still contains only one logical set of rows for that `run_id`
 
 ## Apply to an existing local PostgreSQL volume
 
@@ -86,11 +98,11 @@ Use `docker compose down` when you only want to stop containers and keep data.
 
 ## PowerShell validation
 
-Validate the Compose file and PostgreSQL startup:
+Validate the Compose file and PostgreSQL/Kafka startup:
 
 ```powershell
 docker compose config
-docker compose up -d postgres
+docker compose up -d kafka kafka-ui kafka-init postgres
 ```
 
 Apply the observability SQL file to an existing running volume if needed:
@@ -105,10 +117,16 @@ Install the local writer dependency:
 python -m pip install -r .\observability\requirements.txt
 ```
 
-Run the writer:
+Run the writer without Kafka publishing:
 
 ```powershell
 python .\observability\write_pipeline_observability.py --run-id stage14b-validation
+```
+
+Run the writer with Kafka publishing enabled:
+
+```powershell
+python .\observability\write_pipeline_observability.py --run-id stage14c-validation --publish-alerts --min-processed-records 999999
 ```
 
 Verify both the new observability tables and the existing warehouse tables:
@@ -120,19 +138,33 @@ docker exec -e PGPASSWORD=iot_password -i iot-postgres psql -U iot_user -d iot_l
 Inspect the observability rows written for one run id:
 
 ```powershell
-docker exec -e PGPASSWORD=iot_password -i iot-postgres psql -U iot_user -d iot_logs -P pager=off -c "SELECT run_id, status, processed_records, invalid_records, invalid_rate, total_alerts FROM pipeline_run_audit WHERE run_id = 'stage14b-validation'; SELECT run_id, check_name, check_status, severity, metric_name, metric_value, threshold_value FROM pipeline_quality_checks WHERE run_id = 'stage14b-validation' ORDER BY check_name; SELECT run_id, alert_type, alert_level, is_published_to_kafka FROM pipeline_alerts WHERE run_id = 'stage14b-validation' ORDER BY alert_type;"
+docker exec -e PGPASSWORD=iot_password -i iot-postgres psql -U iot_user -d iot_logs -P pager=off -c "SELECT run_id, status, processed_records, invalid_records, invalid_rate, total_alerts FROM pipeline_run_audit WHERE run_id = 'stage14c-validation'; SELECT run_id, check_name, check_status, severity, metric_name, metric_value, threshold_value FROM pipeline_quality_checks WHERE run_id = 'stage14c-validation' ORDER BY check_name; SELECT run_id, alert_type, alert_level, is_published_to_kafka FROM pipeline_alerts WHERE run_id = 'stage14c-validation' ORDER BY alert_type;"
 ```
 
-Run the writer again with the same run id to prove idempotency:
+Force an alert for validation:
 
 ```powershell
-python .\observability\write_pipeline_observability.py --run-id stage14b-validation
-docker exec -e PGPASSWORD=iot_password -i iot-postgres psql -U iot_user -d iot_logs -P pager=off -c "SELECT COUNT(*) AS audit_rows FROM pipeline_run_audit WHERE run_id = 'stage14b-validation'; SELECT COUNT(*) AS quality_rows FROM pipeline_quality_checks WHERE run_id = 'stage14b-validation';"
+python .\observability\write_pipeline_observability.py --run-id stage14c-validation --publish-alerts --min-processed-records 999999
 ```
 
-Clean up validation rows:
+Consume one alert message from Kafka topic `iot_pipeline_alerts`:
 
 ```powershell
-docker exec -e PGPASSWORD=iot_password -i iot-postgres psql -v ON_ERROR_STOP=1 -U iot_user -d iot_logs -c "DELETE FROM pipeline_alerts WHERE run_id = 'stage14b-validation'; DELETE FROM pipeline_quality_checks WHERE run_id = 'stage14b-validation'; DELETE FROM pipeline_run_audit WHERE run_id = 'stage14b-validation';"
-docker exec -e PGPASSWORD=iot_password -i iot-postgres psql -U iot_user -d iot_logs -P pager=off -c "SELECT COUNT(*) AS audit_rows FROM pipeline_run_audit WHERE run_id = 'stage14b-validation'; SELECT COUNT(*) AS quality_rows FROM pipeline_quality_checks WHERE run_id = 'stage14b-validation'; SELECT COUNT(*) AS alert_rows FROM pipeline_alerts WHERE run_id = 'stage14b-validation';"
+docker exec -i iot-kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic iot_pipeline_alerts --from-beginning --max-messages 1
 ```
+
+Run the writer again with the same run id to prove database idempotency:
+
+```powershell
+python .\observability\write_pipeline_observability.py --run-id stage14c-validation --publish-alerts --min-processed-records 999999
+docker exec -e PGPASSWORD=iot_password -i iot-postgres psql -U iot_user -d iot_logs -P pager=off -c "SELECT COUNT(*) AS audit_rows FROM pipeline_run_audit WHERE run_id = 'stage14c-validation'; SELECT COUNT(*) AS quality_rows FROM pipeline_quality_checks WHERE run_id = 'stage14c-validation'; SELECT COUNT(*) AS alert_rows FROM pipeline_alerts WHERE run_id = 'stage14c-validation';"
+```
+
+Clean up only validation rows from PostgreSQL observability tables:
+
+```powershell
+docker exec -e PGPASSWORD=iot_password -i iot-postgres psql -v ON_ERROR_STOP=1 -U iot_user -d iot_logs -c "DELETE FROM pipeline_alerts WHERE run_id = 'stage14c-validation'; DELETE FROM pipeline_quality_checks WHERE run_id = 'stage14c-validation'; DELETE FROM pipeline_run_audit WHERE run_id = 'stage14c-validation';"
+docker exec -e PGPASSWORD=iot_password -i iot-postgres psql -U iot_user -d iot_logs -P pager=off -c "SELECT COUNT(*) AS audit_rows FROM pipeline_run_audit WHERE run_id = 'stage14c-validation'; SELECT COUNT(*) AS quality_rows FROM pipeline_quality_checks WHERE run_id = 'stage14c-validation'; SELECT COUNT(*) AS alert_rows FROM pipeline_alerts WHERE run_id = 'stage14c-validation';"
+```
+
+Do not delete Kafka topic data during validation. Re-running the same validation may append extra Kafka messages for the same logical `run_id`, which is expected for an append-only topic.
