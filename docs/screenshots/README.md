@@ -45,6 +45,12 @@ Recommended Stage 11C Airflow + MinIO screenshots:
 - `airflow-upload-spark-features-to-minio-logs.png` - logs for `upload_spark_features_to_minio`
 - `airflow-validate-minio-upload-logs.png` - logs for `validate_minio_spark_features_upload`
 
+Recommended Stage 15E dataset-mode Airflow screenshots:
+
+- `airflow-local-pipeline-medium-env.png` - Airflow task logs showing medium-profile env values or row caps
+- `airflow-consumer-progress-medium.png` - consumer task logs with progress updates during a medium-style bounded run
+- `airflow-loader-progress-medium.png` - warehouse loader task logs with progress updates during a medium-style bounded run
+
 Capture suggestions:
 
 - use [http://localhost:8081](http://localhost:8081/) for Airflow screenshots

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import shlex
 from datetime import datetime, timedelta
 from textwrap import dedent
 
@@ -15,6 +17,25 @@ RUN_ID_SAFE = (
     "{{ run_id | replace(':', '_') | replace('+', '_') | replace('.', '_') }}"
 )
 OBSERVABILITY_RUN_ID = f"airflow-observability-{RUN_ID_SAFE}"
+
+DEFAULT_DATASET_PROFILE = "sample"
+DEFAULT_PRODUCER_MAX_ROWS = "0"
+DEFAULT_CONSUMER_MAX_MESSAGES = "72"
+DEFAULT_WAREHOUSE_LOADER_MAX_MESSAGES = "72"
+DEFAULT_CONSUMER_PROGRESS_INTERVAL = "1000"
+DEFAULT_WAREHOUSE_LOADER_PROGRESS_INTERVAL = "1000"
+DEFAULT_PRODUCER_SEND_DELAY_MS = "0"
+
+
+def get_env_value(key: str, default: str) -> str:
+    value = os.getenv(key, "").strip()
+    return value or default
+
+
+def format_compose_env(env_vars: dict[str, str]) -> str:
+    return " ".join(
+        f"-e {key}={shlex.quote(value)}" for key, value in env_vars.items()
+    )
 
 
 def compose_command(command: str) -> str:
@@ -37,6 +58,30 @@ def project_command(command: str) -> str:
     ).strip()
 
 
+DATASET_PROFILE = get_env_value("DATASET_PROFILE", DEFAULT_DATASET_PROFILE)
+PRODUCER_MAX_ROWS = get_env_value("PRODUCER_MAX_ROWS", DEFAULT_PRODUCER_MAX_ROWS)
+CONSUMER_MAX_MESSAGES = get_env_value(
+    "CONSUMER_MAX_MESSAGES",
+    DEFAULT_CONSUMER_MAX_MESSAGES,
+)
+WAREHOUSE_LOADER_MAX_MESSAGES = get_env_value(
+    "WAREHOUSE_LOADER_MAX_MESSAGES",
+    DEFAULT_WAREHOUSE_LOADER_MAX_MESSAGES,
+)
+CONSUMER_PROGRESS_INTERVAL = get_env_value(
+    "CONSUMER_PROGRESS_INTERVAL",
+    DEFAULT_CONSUMER_PROGRESS_INTERVAL,
+)
+WAREHOUSE_LOADER_PROGRESS_INTERVAL = get_env_value(
+    "WAREHOUSE_LOADER_PROGRESS_INTERVAL",
+    DEFAULT_WAREHOUSE_LOADER_PROGRESS_INTERVAL,
+)
+PRODUCER_SEND_DELAY_MS = get_env_value(
+    "PRODUCER_SEND_DELAY_MS",
+    DEFAULT_PRODUCER_SEND_DELAY_MS,
+)
+
+
 default_args = {
     "owner": "airflow",
     "depends_on_past": False,
@@ -57,6 +102,7 @@ It is designed for manual local execution only:
 - safe reset of Kafka runtime state between runs
 - warehouse-table truncation without touching Airflow metadata
 - unique Kafka consumer group ids for each Airflow `run_id`
+- default sample-safe dataset mode settings with optional medium-profile overrides through environment variables
 
 The DAG does **not** start the Streamlit dashboard and does **not** add any cloud or production orchestration.
 It uploads Spark device features only to local MinIO and does **not** use production AWS S3.
@@ -114,7 +160,13 @@ with DAG(
     run_go_producer = BashOperator(
         task_id="run_go_producer",
         bash_command=compose_command(
-            "run --rm -e PRODUCER_SEND_DELAY_MS=0 go-producer"
+            "run --rm "
+            f"{format_compose_env({
+                'DATASET_PROFILE': DATASET_PROFILE,
+                'PRODUCER_MAX_ROWS': PRODUCER_MAX_ROWS,
+                'PRODUCER_SEND_DELAY_MS': PRODUCER_SEND_DELAY_MS,
+            })} "
+            "go-producer"
         ),
         execution_timeout=timedelta(minutes=10),
     )
@@ -124,7 +176,10 @@ with DAG(
         bash_command=compose_command(
             "run --rm "
             f"-e CONSUMER_GROUP_ID=airflow-consumer-{RUN_ID_SAFE} "
-            "-e CONSUMER_MAX_MESSAGES=72 "
+            f"{format_compose_env({
+                'CONSUMER_MAX_MESSAGES': CONSUMER_MAX_MESSAGES,
+                'CONSUMER_PROGRESS_INTERVAL': CONSUMER_PROGRESS_INTERVAL,
+            })} "
             "python-consumer"
         ),
         execution_timeout=timedelta(minutes=10),
@@ -135,7 +190,10 @@ with DAG(
         bash_command=compose_command(
             "run --rm "
             f"-e WAREHOUSE_LOADER_GROUP_ID=airflow-loader-{RUN_ID_SAFE} "
-            "-e WAREHOUSE_LOADER_MAX_MESSAGES=72 "
+            f"{format_compose_env({
+                'WAREHOUSE_LOADER_MAX_MESSAGES': WAREHOUSE_LOADER_MAX_MESSAGES,
+                'WAREHOUSE_LOADER_PROGRESS_INTERVAL': WAREHOUSE_LOADER_PROGRESS_INTERVAL,
+            })} "
             "warehouse-loader"
         ),
         execution_timeout=timedelta(minutes=10),

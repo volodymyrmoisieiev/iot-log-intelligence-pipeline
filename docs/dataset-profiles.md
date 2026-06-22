@@ -194,6 +194,75 @@ docker compose run --build --rm `
 
 For `full` dataset mode, keep these runs manual, local, or cloud-style. They are not intended to be CI-safe.
 
+## Airflow Dataset Mode Integration
+
+Stage 15E wires dataset-mode settings into `airflow/dags/iot_local_pipeline_dag.py` while keeping the default DAG run sample-safe.
+
+Airflow DAG defaults:
+
+- `DATASET_PROFILE=sample`
+- `PRODUCER_MAX_ROWS=0`
+- `PRODUCER_SEND_DELAY_MS=0`
+- `CONSUMER_MAX_MESSAGES=72`
+- `WAREHOUSE_LOADER_MAX_MESSAGES=72`
+- `CONSUMER_PROGRESS_INTERVAL=1000`
+- `WAREHOUSE_LOADER_PROGRESS_INTERVAL=1000`
+
+That means the default Airflow run still behaves like the current tracked sample pipeline.
+
+### Prepare a medium dataset
+
+```powershell
+& 'C:\Users\User\AppData\Local\Programs\Python\Python311\python.exe' .\scripts\create_dataset_profile.py --input .\data\raw\RT_IOT2022.csv --output .\data\processed\medium_iot_logs.csv --rows 10000 --overwrite
+```
+
+### Set environment variables before starting Airflow
+
+```powershell
+$env:DATASET_PROFILE = "medium"
+$env:PRODUCER_MAX_ROWS = "1000"
+$env:CONSUMER_MAX_MESSAGES = "1000"
+$env:WAREHOUSE_LOADER_MAX_MESSAGES = "1000"
+$env:CONSUMER_PROGRESS_INTERVAL = "250"
+$env:WAREHOUSE_LOADER_PROGRESS_INTERVAL = "250"
+```
+
+Recommended values:
+
+- sample mode: keep `DATASET_PROFILE=sample`, `PRODUCER_MAX_ROWS=0`, `CONSUMER_MAX_MESSAGES=72`, `WAREHOUSE_LOADER_MAX_MESSAGES=72`
+- medium mode: keep producer and consumer/loader row caps aligned so all three steps expect the same batch size
+
+### Airflow commands
+
+List DAGs:
+
+```powershell
+docker compose run --rm airflow-webserver airflow dags list
+```
+
+List DAG tasks:
+
+```powershell
+docker compose run --rm airflow-webserver airflow tasks list iot_local_pipeline_dag
+```
+
+Trigger the DAG manually:
+
+```powershell
+docker compose run --rm airflow-webserver airflow dags trigger iot_local_pipeline_dag
+```
+
+Validate row counts after a run:
+
+```powershell
+docker exec -e PGPASSWORD=iot_password -i iot-postgres psql -U iot_user -d iot_logs -P pager=off -c "SELECT COUNT(*) AS processed_rows FROM processed_iot_logs;"
+docker exec -e PGPASSWORD=iot_password -i iot-postgres psql -U iot_user -d iot_logs -P pager=off -c "SELECT COUNT(*) AS invalid_rows FROM invalid_iot_logs;"
+```
+
+### Full mode warning
+
+Use `full` mode only for manual local or cloud-style validation after the full dataset is present. It should not be used in CI, and it should not be part of routine lightweight Airflow demo runs.
+
 ## How Future Stages Will Use This
 
 Later Stage 15 work can wire these documented profiles into:
@@ -204,7 +273,7 @@ Later Stage 15 work can wire these documented profiles into:
 - Airflow orchestration options
 - larger local or cloud-style dataset processing flows
 
-Stage 15A defined the shared profile contract, Stage 15B added local dataset preparation, Stage 15C wired profiles into the Go producer, and Stage 15D adds safer consumer and loader controls for larger validation runs.
+Stage 15A defined the shared profile contract, Stage 15B added local dataset preparation, Stage 15C wired profiles into the Go producer, Stage 15D added safer consumer and loader controls, and Stage 15E carries those dataset settings into the local Airflow DAG and runbook.
 
 ## Validation Commands
 
