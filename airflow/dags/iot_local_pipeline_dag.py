@@ -80,6 +80,25 @@ PRODUCER_SEND_DELAY_MS = get_env_value(
     "PRODUCER_SEND_DELAY_MS",
     DEFAULT_PRODUCER_SEND_DELAY_MS,
 )
+GO_PRODUCER_ENV = format_compose_env(
+    {
+        "DATASET_PROFILE": DATASET_PROFILE,
+        "PRODUCER_MAX_ROWS": PRODUCER_MAX_ROWS,
+        "PRODUCER_SEND_DELAY_MS": PRODUCER_SEND_DELAY_MS,
+    }
+)
+PYTHON_CONSUMER_ENV = format_compose_env(
+    {
+        "CONSUMER_MAX_MESSAGES": CONSUMER_MAX_MESSAGES,
+        "CONSUMER_PROGRESS_INTERVAL": CONSUMER_PROGRESS_INTERVAL,
+    }
+)
+WAREHOUSE_LOADER_ENV = format_compose_env(
+    {
+        "WAREHOUSE_LOADER_MAX_MESSAGES": WAREHOUSE_LOADER_MAX_MESSAGES,
+        "WAREHOUSE_LOADER_PROGRESS_INTERVAL": WAREHOUSE_LOADER_PROGRESS_INTERVAL,
+    }
+)
 
 
 default_args = {
@@ -161,11 +180,8 @@ with DAG(
         task_id="run_go_producer",
         bash_command=compose_command(
             "run --rm "
-            f"{format_compose_env({
-                'DATASET_PROFILE': DATASET_PROFILE,
-                'PRODUCER_MAX_ROWS': PRODUCER_MAX_ROWS,
-                'PRODUCER_SEND_DELAY_MS': PRODUCER_SEND_DELAY_MS,
-            })} "
+            + GO_PRODUCER_ENV
+            + " "
             "go-producer"
         ),
         execution_timeout=timedelta(minutes=10),
@@ -176,10 +192,8 @@ with DAG(
         bash_command=compose_command(
             "run --rm "
             f"-e CONSUMER_GROUP_ID=airflow-consumer-{RUN_ID_SAFE} "
-            f"{format_compose_env({
-                'CONSUMER_MAX_MESSAGES': CONSUMER_MAX_MESSAGES,
-                'CONSUMER_PROGRESS_INTERVAL': CONSUMER_PROGRESS_INTERVAL,
-            })} "
+            + PYTHON_CONSUMER_ENV
+            + " "
             "python-consumer"
         ),
         execution_timeout=timedelta(minutes=10),
@@ -190,10 +204,8 @@ with DAG(
         bash_command=compose_command(
             "run --rm "
             f"-e WAREHOUSE_LOADER_GROUP_ID=airflow-loader-{RUN_ID_SAFE} "
-            f"{format_compose_env({
-                'WAREHOUSE_LOADER_MAX_MESSAGES': WAREHOUSE_LOADER_MAX_MESSAGES,
-                'WAREHOUSE_LOADER_PROGRESS_INTERVAL': WAREHOUSE_LOADER_PROGRESS_INTERVAL,
-            })} "
+            + WAREHOUSE_LOADER_ENV
+            + " "
             "warehouse-loader"
         ),
         execution_timeout=timedelta(minutes=10),
