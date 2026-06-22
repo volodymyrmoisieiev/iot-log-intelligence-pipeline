@@ -23,7 +23,7 @@ func TestReadCSVRecords(t *testing.T) {
 		t.Fatalf("write temp csv: %v", err)
 	}
 
-	records, skipped, err := ReadCSVRecords(filePath)
+	records, skipped, err := ReadCSVRecords(filePath, 0)
 	if err != nil {
 		t.Fatalf("ReadCSVRecords returned error: %v", err)
 	}
@@ -42,6 +42,39 @@ func TestReadCSVRecords(t *testing.T) {
 
 	if records[1].PacketSize != 256 {
 		t.Fatalf("unexpected packet size: %d", records[1].PacketSize)
+	}
+}
+
+func TestReadCSVRecordsAppliesMaxRows(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	filePath := filepath.Join(tempDir, "sample.csv")
+
+	content := "event_timestamp,device_id,source_ip,destination_ip,protocol,packet_size,duration_ms,event_type,attack_type,status\n" +
+		"2025-01-01T00:00:00Z,device_001,10.0.0.1,192.168.1.10,tcp,120,42,normal,None,success\n" +
+		"2025-01-01T00:01:00Z,device_002,10.0.0.2,192.168.1.11,udp,121,10,attack,DOS_SYN,blocked\n" +
+		"2025-01-01T00:02:00Z,device_003,10.0.0.3,192.168.1.12,udp,256,99,attack,ARP_poisioning,failed\n"
+
+	if err := os.WriteFile(filePath, []byte(content), 0o600); err != nil {
+		t.Fatalf("write temp csv: %v", err)
+	}
+
+	records, skipped, err := ReadCSVRecords(filePath, 2)
+	if err != nil {
+		t.Fatalf("ReadCSVRecords returned error: %v", err)
+	}
+
+	if skipped != 0 {
+		t.Fatalf("expected 0 skipped records, got %d", skipped)
+	}
+
+	if len(records) != 2 {
+		t.Fatalf("expected 2 parsed records, got %d", len(records))
+	}
+
+	if records[1].DeviceID != "device_002" {
+		t.Fatalf("unexpected second device id: %s", records[1].DeviceID)
 	}
 }
 

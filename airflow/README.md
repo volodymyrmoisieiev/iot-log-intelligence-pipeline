@@ -15,6 +15,7 @@ This Airflow setup is intentionally local-development only:
 - it does not add AWS, Terraform, CI/CD, deployment logic, authentication, or real credentials
 - it does not start the Streamlit dashboard from Airflow
 - it uses a small custom Airflow image that adds Docker Compose support for local orchestration
+- it keeps `sample` dataset mode as the safe default and lets you override dataset-mode settings through environment variables before starting Airflow
 
 ## What Stage 7 does
 
@@ -147,6 +148,18 @@ Purpose:
 - make demo reruns more consistent
 - keep orchestration logic in Airflow without rewriting the producer, consumer, warehouse-loader, dbt, or Spark services
 
+Dataset-mode defaults in this DAG:
+
+- `DATASET_PROFILE=sample`
+- `PRODUCER_MAX_ROWS=0`
+- `PRODUCER_SEND_DELAY_MS=0`
+- `CONSUMER_MAX_MESSAGES=72`
+- `WAREHOUSE_LOADER_MAX_MESSAGES=72`
+- `CONSUMER_PROGRESS_INTERVAL=1000`
+- `WAREHOUSE_LOADER_PROGRESS_INTERVAL=1000`
+
+These defaults keep the existing local DAG behavior sample-safe. You can override them in your shell before starting Airflow when you intentionally want a `medium` validation run.
+
 Task order:
 
 - `start`
@@ -173,8 +186,9 @@ What each orchestration task does:
 - `start_infrastructure` starts Kafka, Kafka UI, topic initialization, and the warehouse PostgreSQL service
 - `truncate_warehouse_tables` clears only `processed_iot_logs` and `invalid_iot_logs` with `RESTART IDENTITY`
 - `run_go_producer` runs the existing Go producer with zero send delay
-- `run_python_consumer` processes a bounded batch of local Kafka messages with a unique consumer group id per DAG run
-- `run_warehouse_loader` loads processed and invalid records into PostgreSQL with a unique loader group id per DAG run
+- `run_go_producer` also passes `DATASET_PROFILE`, `PRODUCER_MAX_ROWS`, and `PRODUCER_SEND_DELAY_MS`
+- `run_python_consumer` processes a bounded batch of local Kafka messages with a unique consumer group id per DAG run and passes `CONSUMER_MAX_MESSAGES` plus `CONSUMER_PROGRESS_INTERVAL`
+- `run_warehouse_loader` loads processed and invalid records into PostgreSQL with a unique loader group id per DAG run and passes `WAREHOUSE_LOADER_MAX_MESSAGES` plus `WAREHOUSE_LOADER_PROGRESS_INTERVAL`
 - `run_dbt_run` executes existing dbt models
 - `run_dbt_test` executes existing dbt tests
 - `run_spark_device_features` runs `python /app/jobs/device_features_job.py` through `spark-batch`
@@ -242,6 +256,86 @@ Expected successful local result:
 - `run_observability_writer` succeeds
 - `validate_observability_output` succeeds
 
+## Dataset mode runbook
+
+### Default sample-mode Airflow run
+
+If you do not set any dataset-specific overrides, `iot_local_pipeline_dag` stays on the tracked sample dataset and behaves like the current demo pipeline.
+
+Recommended sample-mode values:
+
+- `DATASET_PROFILE=sample`
+- `PRODUCER_MAX_ROWS=0`
+- `CONSUMER_MAX_MESSAGES=72`
+- `WAREHOUSE_LOADER_MAX_MESSAGES=72`
+- `CONSUMER_PROGRESS_INTERVAL=1000`
+- `WAREHOUSE_LOADER_PROGRESS_INTERVAL=1000`
+
+### Prepare a medium dataset
+
+```powershell
+& 'C:\Users\User\AppData\Local\Programs\Python\Python311\python.exe' .\scripts\create_dataset_profile.py --input .\data\raw\RT_IOT2022.csv --output .\data\processed\medium_iot_logs.csv --rows 10000 --overwrite
+```
+
+For a lighter local validation pass, you can use a smaller row target such as `--rows 500` or `--rows 1000`.
+
+### Run Airflow with medium profile
+
+Set the overrides before starting the Airflow services:
+
+```powershell
+$env:DATASET_PROFILE = "medium"
+$env:PRODUCER_MAX_ROWS = "1000"
+$env:CONSUMER_MAX_MESSAGES = "1000"
+$env:WAREHOUSE_LOADER_MAX_MESSAGES = "1000"
+$env:CONSUMER_PROGRESS_INTERVAL = "250"
+$env:WAREHOUSE_LOADER_PROGRESS_INTERVAL = "250"
+docker compose up -d airflow-postgres airflow-init
+docker compose up -d airflow-webserver airflow-scheduler
+```
+
+Before a fuller DAG validation that includes `run_spark_device_features`, prebuild the Spark image once so Airflow does not rebuild it during the DAG run:
+
+```powershell
+docker compose build spark-batch
+```
+
+Recommended medium-mode guidance:
+
+- keep `PRODUCER_MAX_ROWS`, `CONSUMER_MAX_MESSAGES`, and `WAREHOUSE_LOADER_MAX_MESSAGES` aligned so the consumer and loader expect the same number of records the producer will send
+- use unique Airflow-triggered run ids as usual; the DAG already derives unique Kafka group ids from `run_id`
+- keep `full` dataset mode for manual local or cloud-style validation only, not CI
+
+### Useful Airflow commands
+
+List DAGs:
+
+```powershell
+docker compose run --rm airflow-webserver airflow dags list
+```
+
+List DAG tasks:
+
+```powershell
+docker compose run --rm airflow-webserver airflow tasks list iot_local_pipeline_dag
+```
+
+Trigger the DAG manually from CLI:
+
+```powershell
+docker compose run --rm airflow-webserver airflow dags trigger iot_local_pipeline_dag
+```
+
+Validate row counts after a run:
+
+```powershell
+docker exec -e PGPASSWORD=iot_password -i iot-postgres psql -U iot_user -d iot_logs -P pager=off -c "SELECT COUNT(*) AS processed_rows FROM processed_iot_logs;"
+docker exec -e PGPASSWORD=iot_password -i iot-postgres psql -U iot_user -d iot_logs -P pager=off -c "SELECT COUNT(*) AS invalid_rows FROM invalid_iot_logs;"
+```
+
+For sample-mode validation, you usually expect `72` processed rows and `0` invalid rows.
+For medium-mode validation, expected row counts should match the producer row cap you intentionally configured.
+
 ## Troubleshooting
 
 ### Airflow UI does not open
@@ -289,7 +383,8 @@ docker compose up -d airflow-postgres airflow-init airflow-webserver airflow-sch
 
 - confirm `run_spark_device_features` succeeded earlier in the same DAG run
 - inspect `data/processed/spark/device_features` for `part-*.parquet` or other `.parquet` files
-- rerun `docker compose run --build --rm spark-batch python /app/jobs/device_features_job.py` if you need to verify the Spark job independently
+- run `docker compose build spark-batch` first if the Spark image has not been built yet
+- rerun `docker compose run --rm spark-batch python /app/jobs/device_features_job.py` if you need to verify the Spark job independently
 - remember that the validation task checks output existence only, not full data quality
 
 ### MinIO upload or validation task fails

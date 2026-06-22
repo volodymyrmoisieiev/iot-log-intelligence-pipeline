@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -11,18 +12,56 @@ const (
 	defaultContainerBootstrapServers = "kafka:9092"
 	defaultLocalBootstrapServers     = "localhost:29092"
 	defaultRawTopic                  = "iot_raw_logs"
+	defaultDatasetProfile            = "sample"
 	defaultSendDelayMS               = 250
+	defaultProducerMaxRows           = 0
+	datasetProfileSample             = "sample"
+	datasetProfileMedium             = "medium"
+	datasetProfileFull               = "full"
 )
 
 type Config struct {
 	BootstrapServers []string
 	RawTopic         string
+	DatasetProfile   string
 	InputFile        string
+	MaxRows          int
 	SendDelayMS      int
 }
 
+var datasetProfilePaths = map[string]string{
+	datasetProfileSample: "/app/data/samples/sample_iot_logs.csv",
+	datasetProfileMedium: "/app/data/processed/medium_iot_logs.csv",
+	datasetProfileFull:   "/app/data/raw/full_iot_logs.csv",
+}
+
+var datasetProfileRelativePaths = map[string]string{
+	datasetProfileSample: "data/samples/sample_iot_logs.csv",
+	datasetProfileMedium: "data/processed/medium_iot_logs.csv",
+	datasetProfileFull:   "data/raw/full_iot_logs.csv",
+}
+
 func LoadConfig() (Config, error) {
+	datasetProfile, err := getDatasetProfile()
+	if err != nil {
+		return Config{}, err
+	}
+
 	delayMS, err := getEnvInt("PRODUCER_SEND_DELAY_MS", defaultSendDelayMS)
+	if err != nil {
+		return Config{}, err
+	}
+
+	maxRows, err := getEnvInt("PRODUCER_MAX_ROWS", defaultProducerMaxRows)
+	if err != nil {
+		return Config{}, err
+	}
+
+	inputFile, err := resolveInputFile(
+		datasetProfile,
+		strings.TrimSpace(os.Getenv("PRODUCER_INPUT_FILE")),
+		fileExists,
+	)
 	if err != nil {
 		return Config{}, err
 	}
@@ -30,7 +69,9 @@ func LoadConfig() (Config, error) {
 	return Config{
 		BootstrapServers: getBootstrapServers(),
 		RawTopic:         getEnv("KAFKA_RAW_TOPIC", defaultRawTopic),
-		InputFile:        getInputFile(),
+		DatasetProfile:   datasetProfile,
+		InputFile:        inputFile,
+		MaxRows:          maxRows,
 		SendDelayMS:      delayMS,
 	}, nil
 }
@@ -67,25 +108,86 @@ func getEnv(key, fallback string) string {
 	return value
 }
 
-func getInputFile() string {
-	value := strings.TrimSpace(os.Getenv("PRODUCER_INPUT_FILE"))
-	if value != "" {
-		return value
+func getDatasetProfile() (string, error) {
+	value := strings.ToLower(strings.TrimSpace(os.Getenv("DATASET_PROFILE")))
+	if value == "" {
+		return defaultDatasetProfile, nil
 	}
 
-	candidates := []string{
-		"/app/data/samples/sample_iot_logs.csv",
-		"../data/samples/sample_iot_logs.csv",
-		"data/samples/sample_iot_logs.csv",
+	if _, ok := datasetProfilePaths[value]; !ok {
+		return "", fmt.Errorf(
+			"DATASET_PROFILE=%q is invalid; allowed values are sample, medium, full",
+			value,
+		)
 	}
 
-	for _, candidate := range candidates {
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate
+	return value, nil
+}
+
+func resolveInputFile(profile string, explicitInputFile string, exists func(string) bool) (string, error) {
+	if explicitInputFile != "" {
+		if !exists(explicitInputFile) {
+			return "", fmt.Errorf(
+				"PRODUCER_INPUT_FILE points to %s, but the file was not found",
+				explicitInputFile,
+			)
+		}
+
+		return explicitInputFile, nil
+	}
+
+	return resolveProfileInputFile(profile, exists)
+}
+
+func resolveProfileInputFile(profile string, exists func(string) bool) (string, error) {
+	containerPath, ok := datasetProfilePaths[profile]
+	if !ok {
+		return "", fmt.Errorf("unsupported dataset profile: %s", profile)
+	}
+
+	for _, candidate := range datasetProfileCandidates(profile) {
+		if exists(candidate) {
+			return candidate, nil
 		}
 	}
 
-	return candidates[0]
+	return "", datasetProfileMissingError(profile, containerPath)
+}
+
+func datasetProfileCandidates(profile string) []string {
+	relativePath := filepath.FromSlash(datasetProfileRelativePaths[profile])
+
+	return []string{
+		datasetProfilePaths[profile],
+		relativePath,
+		filepath.Join("..", relativePath),
+	}
+}
+
+func datasetProfileMissingError(profile string, resolvedPath string) error {
+	switch profile {
+	case datasetProfileMedium:
+		return fmt.Errorf(
+			"DATASET_PROFILE=medium resolved to %s, but the file was not found. Generate it first with: python .\\scripts\\create_dataset_profile.py --input .\\data\\raw\\RT_IOT2022.csv --output .\\data\\processed\\medium_iot_logs.csv --rows 10000",
+			resolvedPath,
+		)
+	case datasetProfileFull:
+		return fmt.Errorf(
+			"DATASET_PROFILE=full resolved to %s, but the file was not found. Place the full dataset at data/raw/full_iot_logs.csv before running the producer.",
+			resolvedPath,
+		)
+	default:
+		return fmt.Errorf(
+			"DATASET_PROFILE=%s resolved to %s, but the file was not found",
+			profile,
+			resolvedPath,
+		)
+	}
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }
 
 func getDefaultBootstrapServers() string {

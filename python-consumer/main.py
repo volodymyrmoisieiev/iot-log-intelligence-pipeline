@@ -26,7 +26,7 @@ def main() -> int:
     last_message_at = time.monotonic()
 
     logger.info(
-        "starting python consumer brokers=%s raw_topic=%s processed_topic=%s invalid_topic=%s group_id=%s max_messages=%s idle_timeout_seconds=%s",
+        "starting python consumer brokers=%s raw_topic=%s processed_topic=%s invalid_topic=%s group_id=%s max_messages=%s idle_timeout_seconds=%s progress_interval=%s",
         config.kafka_bootstrap_servers,
         config.raw_topic,
         config.processed_topic,
@@ -34,6 +34,7 @@ def main() -> int:
         config.consumer_group_id,
         config.consumer_max_messages,
         config.consumer_idle_timeout_seconds,
+        config.consumer_progress_interval,
     )
 
     try:
@@ -47,7 +48,14 @@ def main() -> int:
             if message_value is None:
                 idle_for = time.monotonic() - last_message_at
                 if idle_for >= config.consumer_idle_timeout_seconds:
-                    logger.info("idle timeout reached after %.2f seconds", idle_for)
+                    if consumed_count == 0:
+                        logger.info(
+                            "no messages received before timeout; group_id=%s idle_timeout_seconds=%s",
+                            config.consumer_group_id,
+                            config.consumer_idle_timeout_seconds,
+                        )
+                    else:
+                        logger.info("idle timeout reached after %.2f seconds", idle_for)
                     break
                 continue
 
@@ -68,6 +76,15 @@ def main() -> int:
                 except Exception as exc:
                     failed_count += 1
                     logger.exception("failed to publish valid record: %s", exc)
+                if consumed_count % config.consumer_progress_interval == 0:
+                    logger.info(
+                        "consumer progress consumed=%s processed=%s invalid=%s failed=%s group_id=%s",
+                        consumed_count,
+                        processed_count,
+                        invalid_count,
+                        failed_count,
+                        config.consumer_group_id,
+                    )
                 continue
 
             invalid_record = build_invalid_record(message_value, validation.error_reason or "unknown validation error")
@@ -82,15 +99,26 @@ def main() -> int:
             except Exception as exc:
                 failed_count += 1
                 logger.exception("failed to publish invalid record: %s", exc)
+            if consumed_count % config.consumer_progress_interval == 0:
+                logger.info(
+                    "consumer progress consumed=%s processed=%s invalid=%s failed=%s group_id=%s",
+                    consumed_count,
+                    processed_count,
+                    invalid_count,
+                    failed_count,
+                    config.consumer_group_id,
+                )
     finally:
         consumer.close()
         producer.close()
         logger.info(
-            "consumer stopped consumed=%s processed=%s invalid=%s failed=%s",
+            "consumer summary consumed=%s processed=%s invalid=%s failed=%s max_messages=%s group_id=%s",
             consumed_count,
             processed_count,
             invalid_count,
             failed_count,
+            config.consumer_max_messages,
+            config.consumer_group_id,
         )
 
     return 0 if failed_count == 0 else 1

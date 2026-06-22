@@ -39,7 +39,7 @@ type JSONMessage struct {
 	IngestionTimestamp string `json:"ingestion_timestamp"`
 }
 
-func ReadCSVRecords(path string) ([]CSVRecord, int, error) {
+func ReadCSVRecords(path string, maxRows int) ([]CSVRecord, int, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, 0, fmt.Errorf("open csv file: %w", err)
@@ -112,6 +112,10 @@ func ReadCSVRecords(path string) ([]CSVRecord, int, error) {
 		}
 
 		records = append(records, record)
+		if maxRows > 0 && len(records) >= maxRows {
+			break
+		}
+
 		rowNumber++
 	}
 
