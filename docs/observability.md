@@ -1,6 +1,6 @@
 # Observability foundation
 
-Stage 14C builds on the Stage 14A PostgreSQL schema foundation and Stage 14B local writer. It adds optional Kafka publishing for generated observability alerts while still leaving Airflow DAG behavior, dbt model logic, dashboard behavior, and Terraform execution unchanged.
+Stage 14D builds on the Stage 14A PostgreSQL schema foundation, the Stage 14B local writer, and the Stage 14C Kafka publishing option. It integrates the observability writer into the local Airflow orchestration DAG while still leaving dbt model logic, dashboard behavior, and Terraform execution unchanged.
 
 ## What these tables are for
 
@@ -25,12 +25,35 @@ Stage 14 is about observability and data-quality alerting.
 - Stage 14A adds the additive PostgreSQL observability tables.
 - Stage 14B adds a local Python writer that reads warehouse counts from `processed_iot_logs` and `invalid_iot_logs`, calculates `invalid_rate`, and writes audit rows, quality checks, and alerts.
 - Stage 14C adds optional publishing of generated alert rows to Kafka topic `iot_pipeline_alerts`.
+- Stage 14D adds Docker Compose and Airflow DAG integration for the observability writer and PostgreSQL-side output validation.
 
-Stage 14C still does not add:
+Stage 14D still does not add:
 
 - a quality monitor service
 - Airflow DAG changes
 - dashboard changes
+
+## Airflow integration
+
+Stage 14D adds Docker Compose service `observability-writer` and two Airflow tasks near the end of `iot_local_pipeline_dag`:
+
+- `run_observability_writer`
+- `validate_observability_output`
+
+Placement in the DAG:
+
+- `run_dbt_run`
+- `run_dbt_test`
+- `run_spark_device_features`
+- `validate_spark_device_features_output`
+- `start_object_storage`
+- `upload_spark_features_to_minio`
+- `validate_minio_spark_features_upload`
+- `run_observability_writer`
+- `validate_observability_output`
+- `finish`
+
+The Airflow task uses a run id derived from the DAG `run_id`, prefixed as `airflow-observability-...`, so repeated DAG runs create separate observability run ids in PostgreSQL. Kafka messages remain append-only and repeated DAG runs can add more topic messages when alerts are generated.
 
 ## Local writer
 
@@ -129,6 +152,12 @@ Run the writer with Kafka publishing enabled:
 python .\observability\write_pipeline_observability.py --run-id stage14c-validation --publish-alerts --min-processed-records 999999
 ```
 
+Run the Docker Compose service that Airflow uses:
+
+```powershell
+docker compose run --build --rm observability-writer --run-id stage14d-compose-validation --publish-alerts
+```
+
 Verify both the new observability tables and the existing warehouse tables:
 
 ```powershell
@@ -151,6 +180,19 @@ Consume one alert message from Kafka topic `iot_pipeline_alerts`:
 
 ```powershell
 docker exec -i iot-kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic iot_pipeline_alerts --from-beginning --max-messages 1
+```
+
+List Airflow DAGs and tasks:
+
+```powershell
+docker compose run --rm airflow-webserver airflow dags list
+docker compose run --rm airflow-webserver airflow tasks list iot_local_pipeline_dag
+```
+
+Validate observability output in PostgreSQL:
+
+```powershell
+docker exec -e PGPASSWORD=iot_password -i iot-postgres psql -U iot_user -d iot_logs -P pager=off -c "SELECT run_id, status, processed_records, invalid_records, invalid_rate, total_alerts FROM pipeline_run_audit WHERE run_id = 'stage14d-compose-validation'; SELECT run_id, check_name, check_status, severity FROM pipeline_quality_checks WHERE run_id = 'stage14d-compose-validation' ORDER BY check_name; SELECT run_id, alert_type, alert_level, is_published_to_kafka FROM pipeline_alerts WHERE run_id = 'stage14d-compose-validation' ORDER BY alert_type;"
 ```
 
 Run the writer again with the same run id to prove database idempotency:

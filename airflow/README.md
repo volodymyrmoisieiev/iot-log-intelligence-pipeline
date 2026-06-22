@@ -11,6 +11,7 @@ This Airflow setup is intentionally local-development only:
 - it generates unique Kafka consumer and loader group ids per Airflow run
 - it runs Spark through the existing local `spark-batch` Docker Compose service in local Docker mode only
 - it uploads Spark device features to local MinIO and validates uploaded objects through the existing local object-storage services
+- it runs the observability writer after the pipeline outputs are available and validates observability rows in PostgreSQL
 - it does not add AWS, Terraform, CI/CD, deployment logic, authentication, or real credentials
 - it does not start the Streamlit dashboard from Airflow
 - it uses a small custom Airflow image that adds Docker Compose support for local orchestration
@@ -23,7 +24,7 @@ Stage 7 gives this repository a local orchestration layer so you can:
 - verify Airflow itself with a smoke DAG
 - trigger the existing local data pipeline from the Airflow UI
 - rerun the pipeline more safely for demos by resetting local Kafka runtime state and truncating only the warehouse pipeline tables
-- run the PySpark device feature engineering job after dbt, validate that Parquet output exists, upload that output to local MinIO, and validate uploaded objects
+- run the PySpark device feature engineering job after dbt, validate that Parquet output exists, upload that output to local MinIO, validate uploaded objects, write observability metrics, and validate observability rows
 
 ## Folder layout
 
@@ -162,6 +163,8 @@ Task order:
 - `start_object_storage`
 - `upload_spark_features_to_minio`
 - `validate_minio_spark_features_upload`
+- `run_observability_writer`
+- `validate_observability_output`
 - `finish`
 
 What each orchestration task does:
@@ -179,10 +182,13 @@ What each orchestration task does:
 - `start_object_storage` starts local MinIO and runs bucket initialization through the `object-storage` Docker Compose profile
 - `upload_spark_features_to_minio` runs the existing `object-storage-uploader` service to upload Spark Parquet output into bucket `iot-data-lake`
 - `validate_minio_spark_features_upload` uses the MinIO client to confirm at least one uploaded `.parquet` object exists under `spark/device_features/latest/`
+- `run_observability_writer` runs the Dockerized observability writer with an Airflow-derived run id and `--publish-alerts`
+- `validate_observability_output` checks for exactly one audit row and at least two quality-check rows for that observability run id
 
 The Streamlit dashboard is intentionally not started by this DAG.
 Airflow metadata tables are intentionally not truncated or reset by this DAG.
 Spark output remains local Parquet output that is uploaded into local MinIO only; it is not loaded into PostgreSQL by Airflow and it is not sent to production AWS S3.
+Kafka alert messages remain append-only, so repeated DAG runs create separate observability run ids and may append additional topic messages.
 
 ## What repeatable runs reset
 
@@ -233,6 +239,8 @@ Expected successful local result:
 - `start_object_storage` brings up local MinIO and bucket initialization successfully
 - `upload_spark_features_to_minio` uploads Spark Parquet output to `iot-data-lake`
 - `validate_minio_spark_features_upload` succeeds after finding at least one uploaded `.parquet` object under `spark/device_features/latest/`
+- `run_observability_writer` succeeds
+- `validate_observability_output` succeeds
 
 ## Troubleshooting
 
@@ -269,6 +277,7 @@ docker compose up -d airflow-postgres airflow-init airflow-webserver airflow-sch
 
 - run `docker compose exec airflow-webserver airflow dags list`
 - check `docker compose exec airflow-webserver airflow dags show iot_local_pipeline_dag`
+- run `docker compose exec airflow-webserver airflow tasks list iot_local_pipeline_dag`
 - review `docker compose logs airflow-scheduler --tail=80`
 
 ### DAG task fails because previous containers are still running
@@ -290,6 +299,13 @@ docker compose up -d airflow-postgres airflow-init airflow-webserver airflow-sch
 - rerun `docker compose --profile object-storage run --build --rm object-storage-uploader` to verify the uploader independently
 - rerun `docker compose --profile object-storage run --rm --entrypoint /bin/sh minio-init -ec 'mc alias set local "$MINIO_ENDPOINT" "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" && mc ls --recursive local/$MINIO_BUCKET/spark/device_features/latest/'` to verify uploaded objects independently
 - remember that this flow targets local MinIO only, not production AWS S3
+
+### Observability writer or validation task fails
+
+- rerun `docker compose run --build --rm observability-writer --run-id manual-observability-check --publish-alerts`
+- inspect PostgreSQL audit rows with `docker exec -e PGPASSWORD=iot_password -i iot-postgres psql -U iot_user -d iot_logs -P pager=off -c "SELECT run_id, status, processed_records, invalid_records, invalid_rate, total_alerts FROM pipeline_run_audit WHERE run_id LIKE 'airflow-observability-%' ORDER BY created_at DESC LIMIT 5;"`
+- inspect quality-check rows with `docker exec -e PGPASSWORD=iot_password -i iot-postgres psql -U iot_user -d iot_logs -P pager=off -c "SELECT run_id, check_name, check_status, severity FROM pipeline_quality_checks WHERE run_id LIKE 'airflow-observability-%' ORDER BY created_at DESC LIMIT 10;"`
+- if alerts were generated, remember topic `iot_pipeline_alerts` is append-only and repeated runs may add more Kafka messages
 
 ### Kafka offsets or repeated runs are confusing
 
@@ -324,6 +340,7 @@ docker compose exec airflow-webserver airflow dags list
 docker compose exec airflow-webserver airflow dags show iot_local_pipeline_dag
 docker compose run --rm airflow-webserver python -m py_compile /opt/airflow/dags/iot_local_pipeline_dag.py
 docker compose run --rm airflow-webserver airflow tasks list iot_local_pipeline_dag
+docker compose run --build --rm observability-writer --run-id airflow-readme-validation --publish-alerts
 ```
 
 Manual UI verification:
