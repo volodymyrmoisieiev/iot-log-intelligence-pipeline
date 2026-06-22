@@ -28,6 +28,12 @@ Use `sample` when you want the fastest feedback loop and when repository validat
 
 Use `medium` when the sample dataset is too small to exercise realistic record volume, but a full raw-dataset run would be too heavy for normal local iteration.
 
+Create it locally with the dataset preparation script:
+
+```powershell
+python .\scripts\create_dataset_profile.py --input .\data\raw\RT_IOT2022.csv --output .\data\processed\medium_iot_logs.csv --rows 10000
+```
+
 ### `full`
 
 - path: `data/raw/full_iot_logs.csv`
@@ -51,16 +57,74 @@ Large raw and generated datasets should not be committed because they make clone
 
 The repository keeps only the tiny sample CSV under version control. Planned future larger inputs such as `data/processed/medium_iot_logs.csv` and `data/raw/full_iot_logs.csv` are intentionally ignored by git.
 
+That means you can generate or copy local larger files for testing without polluting normal commits, pull requests, or repository history.
+
+## Dataset Preparation Script
+
+Stage 15B adds `scripts/create_dataset_profile.py`, a local helper that prepares a smaller CSV from a larger IoT CSV input.
+
+What it does:
+
+- reads a source CSV file
+- validates that the required IoT columns exist
+- writes up to `N` rows to a target CSV
+- preserves the original header row
+- creates the output parent directory if needed
+- refuses to overwrite an existing file unless `--overwrite` is passed
+
+Required columns:
+
+- `event_timestamp`
+- `device_id`
+- `source_ip`
+- `destination_ip`
+- `protocol`
+- `packet_size`
+- `duration_ms`
+- `event_type`
+- `attack_type`
+- `status`
+
+Supported selection modes:
+
+- `first` writes the first `N` data rows after the header
+- `random` writes a reproducible random subset of up to `N` rows using `--seed`
+
+Use `first` when you want deterministic slices that are easy to inspect manually.
+
+Use `random` when you want a broader subset from a larger raw file without taking only the earliest rows.
+
+## Example Commands
+
+Create the planned `medium` dataset from a larger local raw CSV:
+
+```powershell
+python .\scripts\create_dataset_profile.py --input .\data\raw\RT_IOT2022.csv --output .\data\processed\medium_iot_logs.csv --rows 10000
+```
+
+Create a reproducible random `medium` dataset with a custom seed:
+
+```powershell
+python .\scripts\create_dataset_profile.py --input .\data\raw\RT_IOT2022.csv --output .\data\processed\medium_iot_logs.csv --rows 10000 --mode random --seed 7
+```
+
+Replace an existing generated `medium` file intentionally:
+
+```powershell
+python .\scripts\create_dataset_profile.py --input .\data\raw\RT_IOT2022.csv --output .\data\processed\medium_iot_logs.csv --rows 10000 --overwrite
+```
+
 ## How Future Stages Will Use This
 
 Later Stage 15 work can wire these documented profiles into:
 
+- dataset preparation and local profile generation workflows
 - Go producer input selection
 - Python consumer and warehouse-loader validation runs
 - Airflow orchestration options
 - larger local or cloud-style dataset processing flows
 
-Stage 15A is only the shared configuration and documentation layer for that future wiring.
+Stage 15A defined the shared profile contract, and Stage 15B adds the local preparation script that future runtime stages can build on.
 
 ## Validation Commands
 
@@ -69,6 +133,21 @@ Verify the profile file and tracked sample dataset exist:
 ```powershell
 Test-Path .\data\samples\sample_iot_logs.csv
 Test-Path .\data\dataset_profiles.yml
+```
+
+Validate the script safely with the tracked sample file:
+
+```powershell
+python .\scripts\create_dataset_profile.py --input .\data\samples\sample_iot_logs.csv --output .\data\processed\medium_iot_logs.csv --rows 10 --overwrite
+Test-Path .\data\processed\medium_iot_logs.csv
+Get-Content .\data\processed\medium_iot_logs.csv -TotalCount 3
+git check-ignore -v .\data\processed\medium_iot_logs.csv
+```
+
+Delete the generated validation file after the check:
+
+```powershell
+Remove-Item .\data\processed\medium_iot_logs.csv
 ```
 
 Verify the planned larger dataset paths are ignored by git:

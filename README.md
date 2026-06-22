@@ -1016,13 +1016,17 @@ What this stage does not do:
 
 For the focused runbook, profile definitions, and validation commands, see [docs/dataset-profiles.md](docs/dataset-profiles.md).
 
-## 32. Security note
+## 32. Stage 15B dataset preparation script
+
+Stage 15B adds a local helper script at `scripts/create_dataset_profile.py` that can generate a `medium` CSV from a larger IoT CSV input while preserving the Stage 15A git-safety rules for generated datasets.
+
+## 33. Security note
 
 Do not commit real credentials, production secrets, or sensitive data. Use environment variables and secret management outside the repository.
 
-## 33. Current stage
+## 34. Current stage
 
-Stage 15A includes:
+Stage 15B includes:
 
 - repository skeleton and documentation
 - local Docker Compose services for Kafka, Kafka topic initialization, and Kafka UI
@@ -1053,5 +1057,6 @@ Stage 15A includes:
 - an Airflow-integrated observability writer step and PostgreSQL validation step in `iot_local_pipeline_dag`
 - a Streamlit `Pipeline Monitoring` section for latest runs, quality checks, and recent alerts
 - a dataset profile foundation that keeps `data/samples/sample_iot_logs.csv` as the default tracked sample dataset and documents planned `medium` and `full` dataset paths for future stages
+- a local dataset preparation script that can generate `data/processed/medium_iot_logs.csv` from a larger IoT CSV input for future integration-style validation
 
-Airflow now orchestrates the existing local producer, consumer, warehouse loader, dbt flow, PySpark device feature engineering step, local Spark output validation, local MinIO upload, and MinIO object validation through one manual DAG that is safer for repeated demo runs and better documented for local development. Spark still runs only in local Docker mode, and MinIO remains a local S3-compatible target only rather than production AWS S3. Stage 12C keeps the Terraform S3 data lake definitions that mirror the local MinIO pattern for future AWS use and adds CI validation for them, but no AWS resources are created until `terraform apply` is run, and neither `terraform plan` nor `terraform apply` is part of CI. Full dbt execution and full Airflow orchestration are still verified locally through Docker Compose or Airflow, while CI remains limited to safe validation checks. Stage 15A adds only the dataset profile contract and documentation layer for future `sample`, `medium`, and `full` processing modes.
+Airflow now orchestrates the existing local producer, consumer, warehouse loader, dbt flow, PySpark device feature engineering step, local Spark output validation, local MinIO upload, and MinIO object validation through one manual DAG that is safer for repeated demo runs and better documented for local development. Spark still runs only in local Docker mode, and MinIO remains a local S3-compatible target only rather than production AWS S3. Stage 12C keeps the Terraform S3 data lake definitions that mirror the local MinIO pattern for future AWS use and adds CI validation for them, but no AWS resources are created until `terraform apply` is run, and neither `terraform plan` nor `terraform apply` is part of CI. Full dbt execution and full Airflow orchestration are still verified locally through Docker Compose or Airflow, while CI remains limited to safe validation checks. Stage 15A adds the dataset profile contract, and Stage 15B adds the local preparation script for future `sample`, `medium`, and `full` processing workflows.
