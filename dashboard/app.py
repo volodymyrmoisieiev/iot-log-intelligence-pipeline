@@ -4,7 +4,7 @@ import pandas as pd
 import psycopg
 import streamlit as st
 
-from db import fetch_table_data, get_missing_tables, load_database_config, ping_database
+from db import fetch_query_data, fetch_table_data, get_missing_tables, load_database_config, ping_database
 
 PAGE_TITLE = "IoT Log Intelligence Pipeline Analytics"
 PREPARE_DATA_COMMAND = "docker compose run --build --rm dbt dbt run"
@@ -14,6 +14,11 @@ MART_TABLES = [
     "mart_protocol_metrics",
     "mart_pipeline_quality_summary",
 ]
+OBSERVABILITY_TABLES = [
+    "pipeline_run_audit",
+    "pipeline_quality_checks",
+    "pipeline_alerts",
+]
 TOP_N_OPTIONS = [5, 10, 15, 20, 25, 50]
 RISK_ORDER = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
 RISK_DISPLAY_ORDER = ["HIGH", "MEDIUM", "LOW"]
@@ -22,6 +27,11 @@ RISK_DISPLAY_ORDER = ["HIGH", "MEDIUM", "LOW"]
 @st.cache_data(ttl=30, show_spinner=False)
 def load_table(table_name: str) -> pd.DataFrame:
     return fetch_table_data(table_name=table_name)
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def load_query(query: str, params: tuple[object, ...] | None = None) -> pd.DataFrame:
+    return fetch_query_data(query=query, params=params)
 
 
 def render_section_intro(text: str) -> None:
@@ -205,6 +215,244 @@ def render_pipeline_overview(quality_df: pd.DataFrame) -> None:
     )
     st.caption("This one-row mart is helpful for quickly validating that the local end-to-end pipeline produced expected records.")
     st.dataframe(format_dataframe_for_display(quality_df), width="stretch", hide_index=True)
+
+
+def render_observability_query_warning(table_name: str, error_name: str) -> None:
+    st.warning(
+        f"The dashboard could not read observability table `{table_name}` right now. "
+        "Confirm PostgreSQL is available and that Stage 14 observability tables exist."
+    )
+    st.caption(f"Observability error: {error_name}")
+
+
+def load_observability_frames(
+    missing_tables: list[str],
+) -> tuple[dict[str, pd.DataFrame], dict[str, str]]:
+    observability_frames: dict[str, pd.DataFrame] = {}
+    observability_errors: dict[str, str] = {}
+
+    observability_queries = {
+        "pipeline_run_audit": """
+            SELECT
+                run_id,
+                pipeline_name,
+                environment,
+                started_at,
+                finished_at,
+                status,
+                processed_records,
+                invalid_records,
+                invalid_rate,
+                high_risk_devices,
+                total_alerts,
+                created_at
+            FROM pipeline_run_audit
+            ORDER BY created_at DESC, finished_at DESC NULLS LAST
+            LIMIT 20
+        """,
+        "pipeline_quality_checks": """
+            SELECT
+                run_id,
+                check_name,
+                check_status,
+                severity,
+                metric_name,
+                metric_value,
+                threshold_value,
+                message,
+                created_at
+            FROM pipeline_quality_checks
+            ORDER BY created_at DESC, id DESC
+            LIMIT 100
+        """,
+        "pipeline_alerts": """
+            SELECT
+                run_id,
+                alert_type,
+                alert_level,
+                alert_message,
+                source,
+                is_published_to_kafka,
+                created_at
+            FROM pipeline_alerts
+            ORDER BY created_at DESC, id DESC
+            LIMIT 50
+        """,
+    }
+
+    for table_name, query in observability_queries.items():
+        if table_name in missing_tables:
+            observability_frames[table_name] = pd.DataFrame()
+            continue
+
+        try:
+            observability_frames[table_name] = load_query(query)
+        except psycopg.Error as error:
+            observability_frames[table_name] = pd.DataFrame()
+            observability_errors[table_name] = error.__class__.__name__
+        except Exception as error:
+            observability_frames[table_name] = pd.DataFrame()
+            observability_errors[table_name] = error.__class__.__name__
+
+    return observability_frames, observability_errors
+
+
+def format_timestamp(value: object) -> str:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return "n/a"
+    return str(value)
+
+
+def render_pipeline_monitoring_section(
+    run_audit_df: pd.DataFrame,
+    quality_checks_df: pd.DataFrame,
+    alerts_df: pd.DataFrame,
+) -> None:
+    st.header("Pipeline Monitoring")
+    render_section_intro(
+        "Operational observability view from `pipeline_run_audit`, `pipeline_quality_checks`, and `pipeline_alerts`."
+    )
+
+    if run_audit_df.empty and quality_checks_df.empty and alerts_df.empty:
+        render_empty_state(
+            "No observability data available yet.",
+            "Run the observability writer directly or trigger the Airflow pipeline DAG to generate monitoring rows.",
+        )
+        return
+
+    latest_run_id = ""
+    latest_run = pd.Series(dtype=object)
+    if not run_audit_df.empty:
+        latest_run = run_audit_df.iloc[0]
+        latest_run_id = str(latest_run.get("run_id", ""))
+
+        st.subheader("Latest pipeline run")
+        metric_columns = st.columns(4)
+        metric_columns[0].metric("Latest run id", latest_run_id or "n/a")
+        metric_columns[1].metric("Status", str(latest_run.get("status", "n/a")))
+        metric_columns[2].metric(
+            "Processed records",
+            int(latest_run.get("processed_records", 0) or 0),
+        )
+        metric_columns[3].metric(
+            "Invalid records",
+            int(latest_run.get("invalid_records", 0) or 0),
+        )
+
+        metric_columns = st.columns(4)
+        metric_columns[0].metric(
+            "Invalid rate",
+            f"{float(latest_run.get('invalid_rate', 0) or 0) * 100:.2f}%",
+        )
+        metric_columns[1].metric(
+            "High-risk devices",
+            int(latest_run.get("high_risk_devices", 0) or 0),
+        )
+        metric_columns[2].metric(
+            "Total alerts",
+            int(latest_run.get("total_alerts", 0) or 0),
+        )
+        metric_columns[3].metric(
+            "Environment",
+            str(latest_run.get("environment", "n/a")),
+        )
+
+        st.caption(
+            "Finished at: "
+            f"{format_timestamp(latest_run.get('finished_at'))} | "
+            "Created at: "
+            f"{format_timestamp(latest_run.get('created_at'))}"
+        )
+    else:
+        render_empty_state(
+            "No pipeline run audit rows are available yet.",
+            "Run the observability writer or Airflow DAG to populate `pipeline_run_audit`.",
+        )
+
+    st.subheader("Recent pipeline runs")
+    if run_audit_df.empty:
+        render_empty_state(
+            "No recent pipeline runs are available yet.",
+            "This table will populate after the observability writer stores run history.",
+        )
+    else:
+        recent_runs_columns = [
+            "run_id",
+            "status",
+            "processed_records",
+            "invalid_records",
+            "invalid_rate",
+            "high_risk_devices",
+            "total_alerts",
+            "finished_at",
+            "created_at",
+        ]
+        st.dataframe(
+            format_dataframe_for_display(run_audit_df[recent_runs_columns]),
+            width="stretch",
+            hide_index=True,
+        )
+
+    st.subheader("Quality checks for the latest run")
+    if not latest_run_id:
+        render_empty_state(
+            "No latest run is available, so quality checks cannot be matched yet.",
+            "Once `pipeline_run_audit` has rows, the dashboard will filter checks to the latest run id automatically.",
+        )
+    else:
+        latest_quality_checks_df = quality_checks_df[
+            quality_checks_df.get("run_id", pd.Series(dtype=str)).astype(str) == latest_run_id
+        ].copy()
+        if latest_quality_checks_df.empty:
+            render_empty_state(
+                f"No quality checks are available yet for `{latest_run_id}`.",
+                "This can happen if the writer has not populated `pipeline_quality_checks` for the latest run.",
+            )
+        else:
+            st.dataframe(
+                format_dataframe_for_display(
+                    latest_quality_checks_df[
+                        [
+                            "run_id",
+                            "check_name",
+                            "check_status",
+                            "severity",
+                            "metric_name",
+                            "metric_value",
+                            "threshold_value",
+                            "message",
+                            "created_at",
+                        ]
+                    ]
+                ),
+                width="stretch",
+                hide_index=True,
+            )
+
+    st.subheader("Recent alerts")
+    if alerts_df.empty:
+        render_empty_state(
+            "No recent alerts are available yet.",
+            "Alerts appear here when observability checks fail and create rows in `pipeline_alerts`.",
+        )
+    else:
+        st.dataframe(
+            format_dataframe_for_display(
+                alerts_df[
+                    [
+                        "run_id",
+                        "alert_type",
+                        "alert_level",
+                        "alert_message",
+                        "source",
+                        "is_published_to_kafka",
+                        "created_at",
+                    ]
+                ]
+            ),
+            width="stretch",
+            hide_index=True,
+        )
 
 
 def render_device_risk_section(device_df: pd.DataFrame, selected_risk_levels: list[str], top_n: int) -> None:
@@ -417,6 +665,28 @@ def main() -> None:
     protocol_df = mart_frames["mart_protocol_metrics"]
     quality_df = mart_frames["mart_pipeline_quality_summary"]
 
+    try:
+        missing_observability_tables = get_missing_tables(OBSERVABILITY_TABLES)
+    except psycopg.Error as error:
+        st.warning("Unable to inspect observability tables in PostgreSQL.")
+        st.caption(f"Observability metadata error: {error.__class__.__name__}")
+        missing_observability_tables = OBSERVABILITY_TABLES.copy()
+    except Exception as error:
+        st.warning("The dashboard could not inspect observability metadata.")
+        st.caption(f"Observability dashboard error: {error.__class__.__name__}")
+        missing_observability_tables = OBSERVABILITY_TABLES.copy()
+
+    if missing_observability_tables:
+        missing_list = ", ".join(f"`{table_name}`" for table_name in missing_observability_tables)
+        st.info(
+            "Some observability tables are missing, so the Pipeline Monitoring section may show guidance instead of data."
+        )
+        st.caption(f"Missing observability tables: {missing_list}")
+
+    observability_frames, observability_errors = load_observability_frames(missing_observability_tables)
+    for table_name, error_name in observability_errors.items():
+        render_observability_query_warning(table_name, error_name)
+
     selected_risk_levels, selected_attack_types, selected_protocols, top_n = render_sidebar(
         device_df=device_df,
         attack_df=attack_df,
@@ -438,6 +708,11 @@ def main() -> None:
         protocol_df=protocol_df,
         selected_protocols=selected_protocols,
         top_n=top_n,
+    )
+    render_pipeline_monitoring_section(
+        run_audit_df=observability_frames["pipeline_run_audit"],
+        quality_checks_df=observability_frames["pipeline_quality_checks"],
+        alerts_df=observability_frames["pipeline_alerts"],
     )
     render_raw_mart_tables(
         quality_df=quality_df,

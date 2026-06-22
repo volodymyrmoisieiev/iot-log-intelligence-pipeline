@@ -80,3 +80,12 @@ def fetch_table_data(table_name: str, limit: int | None = None) -> pd.DataFrame:
 
 def fetch_table_preview(table_name: str, limit: int = 20) -> pd.DataFrame:
     return fetch_table_data(table_name=table_name, limit=limit)
+
+
+def fetch_query_data(query: str, params: tuple[object, ...] | None = None) -> pd.DataFrame:
+    with get_connection().cursor() as cursor:
+        cursor.execute(query, params or ())
+        rows = cursor.fetchall()
+        columns = [column.name for column in cursor.description or []]
+
+    return pd.DataFrame(rows, columns=columns)

@@ -14,6 +14,7 @@ COMPOSE_PROJECT_NAME = "iot_log_intelligence_pipeline"
 RUN_ID_SAFE = (
     "{{ run_id | replace(':', '_') | replace('+', '_') | replace('.', '_') }}"
 )
+OBSERVABILITY_RUN_ID = f"airflow-observability-{RUN_ID_SAFE}"
 
 
 def compose_command(command: str) -> str:
@@ -222,6 +223,45 @@ with DAG(
         execution_timeout=timedelta(minutes=5),
     )
 
+    run_observability_writer = BashOperator(
+        task_id="run_observability_writer",
+        bash_command=compose_command(
+            "run --build --rm observability-writer "
+            f"--run-id {OBSERVABILITY_RUN_ID} "
+            "--publish-alerts"
+        ),
+        execution_timeout=timedelta(minutes=10),
+    )
+
+    validate_observability_output = BashOperator(
+        task_id="validate_observability_output",
+        bash_command=compose_command(
+            dedent(
+                f"""
+                exec -T postgres bash -lc '
+                observability_run_id="{OBSERVABILITY_RUN_ID}"
+
+                audit_count=$(PGPASSWORD="$POSTGRES_PASSWORD" psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -t -A -c "SELECT COUNT(*) FROM pipeline_run_audit WHERE run_id = '$observability_run_id';")
+                quality_count=$(PGPASSWORD="$POSTGRES_PASSWORD" psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -t -A -c "SELECT COUNT(*) FROM pipeline_quality_checks WHERE run_id = '$observability_run_id';")
+
+                if [ "$audit_count" -ne 1 ]; then
+                    echo "Expected exactly one pipeline_run_audit row for run_id=$observability_run_id, got $audit_count" >&2
+                    exit 1
+                fi
+
+                if [ "$quality_count" -lt 2 ]; then
+                    echo "Expected at least two pipeline_quality_checks rows for run_id=$observability_run_id, got $quality_count" >&2
+                    exit 1
+                fi
+
+                echo "Validated observability output for run_id=$observability_run_id (audit_count=$audit_count, quality_count=$quality_count)"
+                '
+                """
+            ).strip()
+        ),
+        execution_timeout=timedelta(minutes=5),
+    )
+
     finish = EmptyOperator(task_id="finish")
 
     (
@@ -239,5 +279,7 @@ with DAG(
         >> start_object_storage
         >> upload_spark_features_to_minio
         >> validate_minio_spark_features_upload
+        >> run_observability_writer
+        >> validate_observability_output
         >> finish
     )

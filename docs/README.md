@@ -4,4 +4,5 @@ Project documentation, architecture notes, workflow guides, and screenshots live
 
 Focused guides:
 
+- [Observability foundation](observability.md)
 - [Snowflake dbt Runbook](snowflake.md)

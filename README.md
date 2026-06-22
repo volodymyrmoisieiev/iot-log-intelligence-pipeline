@@ -4,7 +4,7 @@
 
 IoT Log Intelligence Pipeline is a portfolio project focused on end-to-end data engineering for IoT logs: ingestion, processing, storage, transformation, and analytics.
 
-The repository is currently at Stage 13A, with a working local Kafka stack, a Go producer, a Python consumer validation layer, a local PostgreSQL warehouse foundation, a warehouse loader service, dbt staging models, dbt analytics marts on top of PostgreSQL, an optional Snowflake-ready dbt target for future cloud warehouse integration, a polished Streamlit dashboard for local analytics, safer repeatable local Apache Airflow orchestration for the existing pipeline steps, a lightweight GitHub Actions CI workflow for repository validation, tests, dbt project validation, Airflow DAG validation, and Terraform validation, a local PySpark batch-processing foundation with a device-level feature engineering job that runs inside the local Airflow pipeline, a local MinIO-based S3-compatible object storage foundation, a local uploader that sends Spark device-feature Parquet output into MinIO, Airflow integration that uploads and validates those MinIO objects as part of the local DAG, an AWS-ready Terraform foundation, and Terraform S3 data lake definitions for future AWS storage.
+The repository is currently at Stage 14E, with a working local Kafka stack, a Go producer, a Python consumer validation layer, a local PostgreSQL warehouse foundation, a warehouse loader service, dbt staging models, dbt analytics marts on top of PostgreSQL, an optional Snowflake-ready dbt target for future cloud warehouse integration, a polished Streamlit dashboard for local analytics, a Streamlit observability monitoring section, safer repeatable local Apache Airflow orchestration for the existing pipeline steps, a lightweight GitHub Actions CI workflow for repository validation, tests, dbt project validation, Airflow DAG validation, and Terraform validation, a local PySpark batch-processing foundation with a device-level feature engineering job that runs inside the local Airflow pipeline, a local MinIO-based S3-compatible object storage foundation, a local uploader that sends Spark device-feature Parquet output into MinIO, Airflow integration that uploads and validates those MinIO objects as part of the local DAG, an AWS-ready Terraform foundation, Terraform S3 data lake definitions for future AWS storage, an observability schema foundation for pipeline audit history, quality checks, and alerts, and a local observability writer that persists warehouse-derived metrics into those audit tables, can optionally publish alert events to Kafka, and runs near the end of the local Airflow DAG.
 
 ## 2. Planned local architecture
 
@@ -90,6 +90,7 @@ iot-log-intelligence-pipeline/
 |       |-- dev/
 |       `-- prod/
 |-- object-storage/
+|-- observability/
 |-- python-consumer/
 |-- spark/
 |-- storage/postgres/init/
@@ -124,7 +125,8 @@ iot-log-intelligence-pipeline/
 - Stage 12A: Terraform AWS infrastructure foundation
 - Stage 12B: AWS resources and data lake infrastructure
 - Stage 12C: Terraform validation in CI
-- Stage 13: CD + final docs
+- Stage 13: Snowflake-ready warehouse option
+- Stage 14: pipeline observability and data quality alerts
 
 ## 7. Stage 1 local setup
 
@@ -963,13 +965,40 @@ What this stage does not do:
 - it does not require Snowflake connectivity in CI
 - it does not run Terraform apply or any cloud deployment command
 
-## 30. Security note
+## 30. Stage 14 observability foundation
+
+Stage 14 adds local pipeline observability in five steps:
+
+- Stage 14A introduces additive PostgreSQL tables for pipeline run history, quality-check results, and alerts.
+- Stage 14B adds a local Python writer that reads existing warehouse row counts, calculates `invalid_rate`, and persists audit rows, quality checks, and alerts for one `run_id`.
+- Stage 14C adds optional Kafka publishing for generated observability alerts on topic `iot_pipeline_alerts`.
+- Stage 14D adds Docker Compose and Airflow DAG integration for the observability writer and output validation.
+- Stage 14E adds a Streamlit `Pipeline Monitoring` section for observability data.
+
+What this stage provides:
+
+- automatic first-run PostgreSQL initialization from `storage/postgres/init/002_create_observability_tables.sql`
+- additive tables `pipeline_run_audit`, `pipeline_quality_checks`, and `pipeline_alerts`
+- indexes for common observability lookups such as `run_id`, statuses, severities, alert levels, and timestamps
+- a local writer script at `observability/write_pipeline_observability.py`
+- optional Kafka publishing for generated alert rows through `--publish-alerts`
+- Airflow DAG tasks `run_observability_writer` and `validate_observability_output` near the end of the local orchestration flow
+- a dashboard `Pipeline Monitoring` section backed by PostgreSQL observability tables
+- a focused runbook at [docs/observability.md](docs/observability.md) for manual application against an existing local PostgreSQL volume and local writer validation without deleting data
+
+What this stage does not do:
+
+- it does not add a quality monitor service yet
+- it does not change Airflow DAG logic yet
+- it does not change dashboard behavior yet
+
+## 31. Security note
 
 Do not commit real credentials, production secrets, or sensitive data. Use environment variables and secret management outside the repository.
 
-## 31. Current stage
+## 32. Current stage
 
-Stage 13A includes:
+Stage 14E includes:
 
 - repository skeleton and documentation
 - local Docker Compose services for Kafka, Kafka topic initialization, and Kafka UI
@@ -994,5 +1023,10 @@ Stage 13A includes:
 - GitHub Actions validation for Terraform formatting, backend-free initialization, and config validation without AWS credentials
 - safe local environment placeholders
 - optional Snowflake environment placeholders for future cloud warehouse work
+- additive PostgreSQL observability tables for pipeline run audits, quality checks, and alerts
+- a local Python observability writer that reads warehouse counts and writes observability metrics for one run id
+- optional Kafka publishing of generated observability alerts to topic `iot_pipeline_alerts`
+- an Airflow-integrated observability writer step and PostgreSQL validation step in `iot_local_pipeline_dag`
+- a Streamlit `Pipeline Monitoring` section for latest runs, quality checks, and recent alerts
 
 Airflow now orchestrates the existing local producer, consumer, warehouse loader, dbt flow, PySpark device feature engineering step, local Spark output validation, local MinIO upload, and MinIO object validation through one manual DAG that is safer for repeated demo runs and better documented for local development. Spark still runs only in local Docker mode, and MinIO remains a local S3-compatible target only rather than production AWS S3. Stage 12C keeps the Terraform S3 data lake definitions that mirror the local MinIO pattern for future AWS use and adds CI validation for them, but no AWS resources are created until `terraform apply` is run, and neither `terraform plan` nor `terraform apply` is part of CI. Full dbt execution and full Airflow orchestration are still verified locally through Docker Compose or Airflow, while CI remains limited to safe validation checks.
