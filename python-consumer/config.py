@@ -9,6 +9,7 @@ DEFAULT_INVALID_TOPIC = "iot_invalid_logs"
 DEFAULT_CONSUMER_GROUP_ID = "iot-python-consumer"
 DEFAULT_CONSUMER_MAX_MESSAGES = 0
 DEFAULT_CONSUMER_IDLE_TIMEOUT_SECONDS = 10
+DEFAULT_CONSUMER_PROGRESS_INTERVAL = 1000
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,7 @@ class Config:
     consumer_group_id: str
     consumer_max_messages: int
     consumer_idle_timeout_seconds: int
+    consumer_progress_interval: int
 
 
 def load_config() -> Config:
@@ -33,6 +35,10 @@ def load_config() -> Config:
         consumer_idle_timeout_seconds=_get_env_int(
             "CONSUMER_IDLE_TIMEOUT_SECONDS",
             DEFAULT_CONSUMER_IDLE_TIMEOUT_SECONDS,
+        ),
+        consumer_progress_interval=_get_env_positive_int(
+            "CONSUMER_PROGRESS_INTERVAL",
+            DEFAULT_CONSUMER_PROGRESS_INTERVAL,
         ),
     )
 
@@ -55,4 +61,11 @@ def _get_env_int(key: str, default: int) -> int:
     if value < 0:
         raise ValueError(f"{key} must be zero or greater")
 
+    return value
+
+
+def _get_env_positive_int(key: str, default: int) -> int:
+    value = _get_env_int(key, default)
+    if value <= 0:
+        raise ValueError(f"{key} must be greater than zero")
     return value

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -20,9 +21,15 @@ func run() error {
 		return err
 	}
 
-	fmt.Printf("starting Go producer with input=%s topic=%s brokers=%v delay_ms=%d\n", cfg.InputFile, cfg.RawTopic, cfg.BootstrapServers, cfg.SendDelayMS)
+	fmt.Println("starting Go producer")
+	fmt.Printf("dataset profile: %s\n", cfg.DatasetProfile)
+	fmt.Printf("resolved input file: %s\n", cfg.InputFile)
+	fmt.Printf("max rows: %d\n", cfg.MaxRows)
+	fmt.Printf("send delay ms: %d\n", cfg.SendDelayMS)
+	fmt.Printf("kafka bootstrap servers: %s\n", strings.Join(cfg.BootstrapServers, ","))
+	fmt.Printf("target topic: %s\n", cfg.RawTopic)
 
-	records, skippedCount, err := ReadCSVRecords(cfg.InputFile)
+	records, skippedCount, err := ReadCSVRecords(cfg.InputFile, cfg.MaxRows)
 	if err != nil {
 		return err
 	}

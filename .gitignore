@@ -74,6 +74,7 @@ airflow/webserver_config.py
 docker-data/
 
 # Data outputs
+# Keep only the tiny committed sample dataset and metadata in git.
 data/raw/*
 data/raw/*.csv
 data/raw/*.json

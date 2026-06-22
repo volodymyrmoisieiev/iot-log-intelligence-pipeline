@@ -1,0 +1,27 @@
+profiles:
+  sample:
+    profile_name: sample
+    description: Tiny tracked CSV used for local demos, smoke checks, and CI-safe validation.
+    expected_input_path: data/samples/sample_iot_logs.csv
+    intended_use: Fast local runs, examples, and lightweight automated validation.
+    ci_safe: true
+    commit_to_git: true
+    row_limit_guidance: Keep intentionally small so repository clones, demos, and CI remain fast.
+
+  medium:
+    profile_name: medium
+    description: Larger processed subset reserved for richer integration testing before full-scale runs.
+    expected_input_path: data/processed/medium_iot_logs.csv
+    intended_use: Local integration tests and repeatable validation on more representative data volume.
+    ci_safe: false
+    commit_to_git: false
+    row_limit_guidance: Use a curated subset large enough to exercise pipeline behavior without full raw volume.
+
+  full:
+    profile_name: full
+    description: Complete raw IoT dataset for manual, local, or cloud-style validation runs.
+    expected_input_path: data/raw/full_iot_logs.csv
+    intended_use: End-to-end scale validation outside normal CI and quick local demo workflows.
+    ci_safe: false
+    commit_to_git: false
+    row_limit_guidance: No fixed row cap; expect the full raw source dataset and keep it outside normal git history.

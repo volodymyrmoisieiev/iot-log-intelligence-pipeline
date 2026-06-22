@@ -34,7 +34,7 @@ def main() -> int:
     last_message_at = time.monotonic()
 
     logger.info(
-        "starting warehouse loader brokers=%s processed_topic=%s invalid_topic=%s postgres_host=%s postgres_port=%s postgres_db=%s group_id=%s max_messages=%s idle_timeout_seconds=%s",
+        "starting warehouse loader brokers=%s processed_topic=%s invalid_topic=%s postgres_host=%s postgres_port=%s postgres_db=%s group_id=%s max_messages=%s idle_timeout_seconds=%s progress_interval=%s",
         config.kafka_bootstrap_servers,
         config.processed_topic,
         config.invalid_topic,
@@ -44,6 +44,7 @@ def main() -> int:
         config.warehouse_loader_group_id,
         config.warehouse_loader_max_messages,
         config.warehouse_loader_idle_timeout_seconds,
+        config.warehouse_loader_progress_interval,
     )
 
     try:
@@ -60,7 +61,14 @@ def main() -> int:
             if message is None:
                 idle_for = time.monotonic() - last_message_at
                 if idle_for >= config.warehouse_loader_idle_timeout_seconds:
-                    logger.info("idle timeout reached after %.2f seconds", idle_for)
+                    if consumed_count == 0:
+                        logger.info(
+                            "no messages received before timeout; group_id=%s idle_timeout_seconds=%s",
+                            config.warehouse_loader_group_id,
+                            config.warehouse_loader_idle_timeout_seconds,
+                        )
+                    else:
+                        logger.info("idle timeout reached after %.2f seconds", idle_for)
                     break
                 continue
 
@@ -98,15 +106,26 @@ def main() -> int:
             except Exception as exc:
                 failed_count += 1
                 logger.exception("failed to process warehouse message: %s", exc)
+            if consumed_count % config.warehouse_loader_progress_interval == 0:
+                logger.info(
+                    "warehouse loader progress consumed=%s inserted_processed=%s inserted_invalid=%s failed=%s group_id=%s",
+                    consumed_count,
+                    processed_count,
+                    invalid_count,
+                    failed_count,
+                    config.warehouse_loader_group_id,
+                )
     finally:
         consumer.close()
         database.close()
         logger.info(
-            "warehouse loader stopped consumed=%s inserted_processed=%s inserted_invalid=%s failed=%s",
+            "warehouse loader summary consumed=%s inserted_processed=%s inserted_invalid=%s failed=%s max_messages=%s group_id=%s",
             consumed_count,
             processed_count,
             invalid_count,
             failed_count,
+            config.warehouse_loader_max_messages,
+            config.warehouse_loader_group_id,
         )
 
     return 0 if failed_count == 0 else 1
