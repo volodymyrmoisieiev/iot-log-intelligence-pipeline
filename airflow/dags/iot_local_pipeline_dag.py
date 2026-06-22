@@ -302,9 +302,8 @@ with DAG(
                 f"""
                 exec -T postgres bash -lc '
                 observability_run_id="{OBSERVABILITY_RUN_ID}"
-
-                audit_count=$(PGPASSWORD="$POSTGRES_PASSWORD" psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -t -A -c "SELECT COUNT(*) FROM pipeline_run_audit WHERE run_id = '$observability_run_id';")
-                quality_count=$(PGPASSWORD="$POSTGRES_PASSWORD" psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -t -A -c "SELECT COUNT(*) FROM pipeline_quality_checks WHERE run_id = '$observability_run_id';")
+                audit_count=$(PGPASSWORD="$POSTGRES_PASSWORD" psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -t -A -v ON_ERROR_STOP=1 -c "SELECT COUNT(*) FROM pipeline_run_audit WHERE run_id = \$run_id\$$observability_run_id\$run_id\$;")
+                quality_count=$(PGPASSWORD="$POSTGRES_PASSWORD" psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -t -A -v ON_ERROR_STOP=1 -c "SELECT COUNT(*) FROM pipeline_quality_checks WHERE run_id = \$run_id\$$observability_run_id\$run_id\$;")
 
                 if [ "$audit_count" -ne 1 ]; then
                     echo "Expected exactly one pipeline_run_audit row for run_id=$observability_run_id, got $audit_count" >&2
