@@ -214,7 +214,7 @@ with DAG(
     run_spark_device_features = BashOperator(
         task_id="run_spark_device_features",
         bash_command=compose_command(
-            "run --build --rm spark-batch python /app/jobs/device_features_job.py"
+            "run --rm spark-batch python /app/jobs/device_features_job.py"
         ),
         execution_timeout=timedelta(minutes=15),
     )

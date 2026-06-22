@@ -294,6 +294,12 @@ docker compose up -d airflow-postgres airflow-init
 docker compose up -d airflow-webserver airflow-scheduler
 ```
 
+Before a fuller DAG validation that includes `run_spark_device_features`, prebuild the Spark image once so Airflow does not rebuild it during the DAG run:
+
+```powershell
+docker compose build spark-batch
+```
+
 Recommended medium-mode guidance:
 
 - keep `PRODUCER_MAX_ROWS`, `CONSUMER_MAX_MESSAGES`, and `WAREHOUSE_LOADER_MAX_MESSAGES` aligned so the consumer and loader expect the same number of records the producer will send
@@ -377,7 +383,8 @@ docker compose up -d airflow-postgres airflow-init airflow-webserver airflow-sch
 
 - confirm `run_spark_device_features` succeeded earlier in the same DAG run
 - inspect `data/processed/spark/device_features` for `part-*.parquet` or other `.parquet` files
-- rerun `docker compose run --build --rm spark-batch python /app/jobs/device_features_job.py` if you need to verify the Spark job independently
+- run `docker compose build spark-batch` first if the Spark image has not been built yet
+- rerun `docker compose run --rm spark-batch python /app/jobs/device_features_job.py` if you need to verify the Spark job independently
 - remember that the validation task checks output existence only, not full data quality
 
 ### MinIO upload or validation task fails
