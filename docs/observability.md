@@ -1,6 +1,6 @@
 # Observability foundation
 
-Stage 14D builds on the Stage 14A PostgreSQL schema foundation, the Stage 14B local writer, and the Stage 14C Kafka publishing option. It integrates the observability writer into the local Airflow orchestration DAG while still leaving dbt model logic, dashboard behavior, and Terraform execution unchanged.
+Stage 14E builds on the Stage 14A PostgreSQL schema foundation, the Stage 14B local writer, the Stage 14C Kafka publishing option, and the Stage 14D Airflow integration. It adds a Streamlit dashboard section for observability while still leaving dbt model logic and Terraform execution unchanged.
 
 ## What these tables are for
 
@@ -26,12 +26,29 @@ Stage 14 is about observability and data-quality alerting.
 - Stage 14B adds a local Python writer that reads warehouse counts from `processed_iot_logs` and `invalid_iot_logs`, calculates `invalid_rate`, and writes audit rows, quality checks, and alerts.
 - Stage 14C adds optional publishing of generated alert rows to Kafka topic `iot_pipeline_alerts`.
 - Stage 14D adds Docker Compose and Airflow DAG integration for the observability writer and PostgreSQL-side output validation.
+- Stage 14E adds a Streamlit `Pipeline Monitoring` section that reads observability tables from PostgreSQL.
 
-Stage 14D still does not add:
+Stage 14E still does not add:
 
 - a quality monitor service
 - Airflow DAG changes
-- dashboard changes
+
+## Dashboard integration
+
+Stage 14E adds `Pipeline Monitoring` to the Streamlit dashboard. It reads:
+
+- `pipeline_run_audit`
+- `pipeline_quality_checks`
+- `pipeline_alerts`
+
+The section shows:
+
+- latest pipeline run summary
+- recent pipeline runs table
+- quality checks for the latest run
+- recent alerts table
+
+If the observability tables are empty or only partially populated, the dashboard shows friendly guidance instead of crashing.
 
 ## Airflow integration
 
@@ -158,6 +175,13 @@ Run the Docker Compose service that Airflow uses:
 docker compose run --build --rm observability-writer --run-id stage14d-compose-validation --publish-alerts
 ```
 
+Start the Streamlit dashboard:
+
+```powershell
+docker compose up -d streamlit-dashboard
+curl -I http://localhost:8501
+```
+
 Verify both the new observability tables and the existing warehouse tables:
 
 ```powershell
@@ -194,6 +218,16 @@ Validate observability output in PostgreSQL:
 ```powershell
 docker exec -e PGPASSWORD=iot_password -i iot-postgres psql -U iot_user -d iot_logs -P pager=off -c "SELECT run_id, status, processed_records, invalid_records, invalid_rate, total_alerts FROM pipeline_run_audit WHERE run_id = 'stage14d-compose-validation'; SELECT run_id, check_name, check_status, severity FROM pipeline_quality_checks WHERE run_id = 'stage14d-compose-validation' ORDER BY check_name; SELECT run_id, alert_type, alert_level, is_published_to_kafka FROM pipeline_alerts WHERE run_id = 'stage14d-compose-validation' ORDER BY alert_type;"
 ```
+
+Generate observability data for dashboard validation:
+
+```powershell
+docker compose up -d postgres
+docker compose run --build --rm observability-writer --run-id stage14e-dashboard-validation --publish-alerts --min-processed-records 999999
+docker exec -e PGPASSWORD=iot_password -i iot-postgres psql -U iot_user -d iot_logs -P pager=off -c "SELECT run_id, status, processed_records, invalid_records, invalid_rate, total_alerts FROM pipeline_run_audit WHERE run_id = 'stage14e-dashboard-validation'; SELECT run_id, check_name, check_status, severity FROM pipeline_quality_checks WHERE run_id = 'stage14e-dashboard-validation' ORDER BY check_name; SELECT run_id, alert_type, alert_level, is_published_to_kafka FROM pipeline_alerts WHERE run_id = 'stage14e-dashboard-validation';"
+```
+
+Find `Pipeline Monitoring` in the Streamlit UI at [http://localhost:8501](http://localhost:8501/). For a polished portfolio demo, first generate rows through either the local writer or the Airflow DAG, then capture both the latest run summary and the recent alerts table.
 
 Run the writer again with the same run id to prove database idempotency:
 
