@@ -267,13 +267,17 @@ with DAG(
                 --profile object-storage run --rm --entrypoint /bin/sh minio-init -ec '
                 mc alias set local "$MINIO_ENDPOINT" "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"
                 object_path="local/$MINIO_BUCKET/spark/device_features/latest/"
+                objects="$(mc ls --recursive "$object_path" || true)"
 
-                if ! mc ls --recursive "$object_path" | grep -E "\\.parquet$" >/dev/null; then
-                    echo "No uploaded Parquet objects found under s3://$MINIO_BUCKET/spark/device_features/latest/" >&2
-                    exit 1
-                fi
-
-                echo "Validated uploaded Parquet objects under s3://$MINIO_BUCKET/spark/device_features/latest/"
+                case "$objects" in
+                    *".parquet"*)
+                        echo "Validated uploaded Parquet objects under s3://$MINIO_BUCKET/spark/device_features/latest/"
+                        ;;
+                    *)
+                        echo "No uploaded Parquet objects found under s3://$MINIO_BUCKET/spark/device_features/latest/" >&2
+                        exit 1
+                        ;;
+                esac
                 '
                 """
             ).strip()
