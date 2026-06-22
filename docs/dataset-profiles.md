@@ -114,6 +114,52 @@ Replace an existing generated `medium` file intentionally:
 python .\scripts\create_dataset_profile.py --input .\data\raw\RT_IOT2022.csv --output .\data\processed\medium_iot_logs.csv --rows 10000 --overwrite
 ```
 
+## Go Producer Profile Usage
+
+Stage 15C adds dataset profile support to the Go producer while keeping the default sample behavior unchanged.
+
+Producer behavior:
+
+- default profile is `sample`
+- `PRODUCER_INPUT_FILE` still works and overrides `DATASET_PROFILE`
+- `PRODUCER_MAX_ROWS=0` means no limit
+- positive `PRODUCER_MAX_ROWS` values cap how many records are read and published
+
+Producer profile mapping:
+
+- `sample` -> `/app/data/samples/sample_iot_logs.csv`
+- `medium` -> `/app/data/processed/medium_iot_logs.csv`
+- `full` -> `/app/data/raw/full_iot_logs.csv`
+
+PowerShell examples:
+
+Default sample producer run:
+
+```powershell
+docker compose up -d kafka kafka-ui kafka-init
+docker compose run --build --rm -e PRODUCER_SEND_DELAY_MS=0 go-producer
+```
+
+Sample profile with a row cap:
+
+```powershell
+docker compose run --build --rm -e DATASET_PROFILE=sample -e PRODUCER_SEND_DELAY_MS=0 -e PRODUCER_MAX_ROWS=5 go-producer
+```
+
+Medium profile after generating `data/processed/medium_iot_logs.csv`:
+
+```powershell
+docker compose run --build --rm -e DATASET_PROFILE=medium -e PRODUCER_SEND_DELAY_MS=0 -e PRODUCER_MAX_ROWS=5 go-producer
+```
+
+Full profile warning:
+
+```powershell
+docker compose run --build --rm -e DATASET_PROFILE=full -e PRODUCER_SEND_DELAY_MS=0 go-producer
+```
+
+Use `full` only for intentional manual or larger-scale validation after placing the raw file at `data/raw/full_iot_logs.csv`.
+
 ## How Future Stages Will Use This
 
 Later Stage 15 work can wire these documented profiles into:
@@ -124,7 +170,7 @@ Later Stage 15 work can wire these documented profiles into:
 - Airflow orchestration options
 - larger local or cloud-style dataset processing flows
 
-Stage 15A defined the shared profile contract, and Stage 15B adds the local preparation script that future runtime stages can build on.
+Stage 15A defined the shared profile contract, Stage 15B added local dataset preparation, and Stage 15C wires those profiles into the Go producer entry point.
 
 ## Validation Commands
 
