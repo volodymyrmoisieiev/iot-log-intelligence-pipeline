@@ -160,6 +160,40 @@ docker compose run --build --rm -e DATASET_PROFILE=full -e PRODUCER_SEND_DELAY_M
 
 Use `full` only for intentional manual or larger-scale validation after placing the raw file at `data/raw/full_iot_logs.csv`.
 
+## Consumer and Loader Safety for Larger Runs
+
+Stage 15D keeps the existing consumer and warehouse-loader behavior but adds clearer progress and summary logging for larger validation runs.
+
+Useful controls:
+
+- `CONSUMER_MAX_MESSAGES` and `WAREHOUSE_LOADER_MAX_MESSAGES` keep medium or full validation runs bounded
+- `CONSUMER_PROGRESS_INTERVAL` and `WAREHOUSE_LOADER_PROGRESS_INTERVAL` control how often progress logs are printed
+- unique `CONSUMER_GROUP_ID` and `WAREHOUSE_LOADER_GROUP_ID` values help you run repeatable validation passes without reusing an older Kafka group state
+
+PowerShell examples:
+
+Consumer on a bounded larger run:
+
+```powershell
+docker compose run --build --rm `
+  -e CONSUMER_GROUP_ID=stage15d-consumer `
+  -e CONSUMER_MAX_MESSAGES=10 `
+  -e CONSUMER_PROGRESS_INTERVAL=5 `
+  python-consumer
+```
+
+Warehouse loader on a bounded larger run:
+
+```powershell
+docker compose run --build --rm `
+  -e WAREHOUSE_LOADER_GROUP_ID=stage15d-loader `
+  -e WAREHOUSE_LOADER_MAX_MESSAGES=10 `
+  -e WAREHOUSE_LOADER_PROGRESS_INTERVAL=5 `
+  warehouse-loader
+```
+
+For `full` dataset mode, keep these runs manual, local, or cloud-style. They are not intended to be CI-safe.
+
 ## How Future Stages Will Use This
 
 Later Stage 15 work can wire these documented profiles into:
@@ -170,7 +204,7 @@ Later Stage 15 work can wire these documented profiles into:
 - Airflow orchestration options
 - larger local or cloud-style dataset processing flows
 
-Stage 15A defined the shared profile contract, Stage 15B added local dataset preparation, and Stage 15C wires those profiles into the Go producer entry point.
+Stage 15A defined the shared profile contract, Stage 15B added local dataset preparation, Stage 15C wired profiles into the Go producer, and Stage 15D adds safer consumer and loader controls for larger validation runs.
 
 ## Validation Commands
 

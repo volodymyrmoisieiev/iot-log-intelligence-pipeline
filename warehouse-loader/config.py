@@ -13,6 +13,7 @@ DEFAULT_POSTGRES_PORT = 5432
 DEFAULT_WAREHOUSE_LOADER_GROUP_ID = "iot-warehouse-loader"
 DEFAULT_WAREHOUSE_LOADER_MAX_MESSAGES = 0
 DEFAULT_WAREHOUSE_LOADER_IDLE_TIMEOUT_SECONDS = 10
+DEFAULT_WAREHOUSE_LOADER_PROGRESS_INTERVAL = 1000
 
 
 @dataclass(frozen=True)
@@ -28,6 +29,7 @@ class Config:
     warehouse_loader_group_id: str
     warehouse_loader_max_messages: int
     warehouse_loader_idle_timeout_seconds: int
+    warehouse_loader_progress_interval: int
 
 
 def load_config() -> Config:
@@ -52,6 +54,10 @@ def load_config() -> Config:
             "WAREHOUSE_LOADER_IDLE_TIMEOUT_SECONDS",
             DEFAULT_WAREHOUSE_LOADER_IDLE_TIMEOUT_SECONDS,
         ),
+        warehouse_loader_progress_interval=_get_env_positive_int(
+            "WAREHOUSE_LOADER_PROGRESS_INTERVAL",
+            DEFAULT_WAREHOUSE_LOADER_PROGRESS_INTERVAL,
+        ),
     )
 
 
@@ -73,4 +79,11 @@ def _get_env_int(key: str, default: int) -> int:
     if value < 0:
         raise ValueError(f"{key} must be zero or greater")
 
+    return value
+
+
+def _get_env_positive_int(key: str, default: int) -> int:
+    value = _get_env_int(key, default)
+    if value <= 0:
+        raise ValueError(f"{key} must be greater than zero")
     return value
