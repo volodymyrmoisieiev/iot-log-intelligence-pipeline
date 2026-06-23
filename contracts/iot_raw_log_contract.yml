@@ -1,0 +1,123 @@
+contract_name: iot_raw_log_contract
+version: 1.0.0
+
+dataset:
+  name: raw_iot_log_csv
+  format: csv
+  owner: IoT Log Intelligence Pipeline
+  created_stage: Stage 17A
+  description: >
+    Foundational data contract for the raw IoT log dataset used by the
+    pipeline's ingestion and validation stages.
+  notes:
+    - This Stage 17A contract defines the expected raw CSV schema only.
+    - Allowed values may be expanded later after full-dataset review.
+
+schema:
+  columns:
+    event_timestamp:
+      required: true
+      logical_type: datetime
+      storage_type: string
+      nullable: false
+      description: Event time recorded by the raw IoT log source.
+      validation:
+        format: timestamp string; ISO 8601-compatible values are preferred
+        min_length: 1
+
+    device_id:
+      required: true
+      logical_type: string
+      storage_type: string
+      nullable: false
+      description: Identifier for the IoT device that produced the event.
+      validation:
+        min_length: 1
+
+    source_ip:
+      required: true
+      logical_type: ip_address
+      storage_type: string
+      nullable: false
+      description: Source IP address associated with the observed network event.
+      validation:
+        format: ipv4_or_ipv6
+        min_length: 1
+
+    destination_ip:
+      required: true
+      logical_type: ip_address
+      storage_type: string
+      nullable: false
+      description: Destination IP address associated with the observed network event.
+      validation:
+        format: ipv4_or_ipv6
+        min_length: 1
+
+    protocol:
+      required: true
+      logical_type: string
+      storage_type: string
+      nullable: false
+      description: Network or application protocol observed for the event.
+      validation:
+        allowed_values:
+          - TCP
+          - UDP
+          - ICMP
+          - HTTP
+          - HTTPS
+          - MQTT
+          - ARP
+        min_length: 1
+
+    packet_size:
+      required: true
+      logical_type: integer
+      storage_type: integer
+      nullable: false
+      description: Packet size in bytes for the observed event.
+      validation:
+        min: 0
+
+    duration_ms:
+      required: true
+      logical_type: integer
+      storage_type: integer
+      nullable: false
+      description: Duration of the event in milliseconds.
+      validation:
+        min: 0
+
+    event_type:
+      required: true
+      logical_type: string
+      storage_type: string
+      nullable: false
+      description: High-level event classification from the raw dataset.
+      validation:
+        min_length: 1
+
+    attack_type:
+      required: true
+      logical_type: string
+      storage_type: string
+      nullable: true
+      description: Attack label or category when the event is security-related.
+      validation:
+        allow_null: true
+
+    status:
+      required: true
+      logical_type: string
+      storage_type: string
+      nullable: false
+      description: Outcome or handling status for the observed event.
+      validation:
+        allowed_values:
+          - success
+          - failed
+          - blocked
+          - allowed
+          - warning
+        min_length: 1
