@@ -17,6 +17,7 @@ RUN_ID_SAFE = (
     "{{ run_id | replace(':', '_') | replace('+', '_') | replace('.', '_') }}"
 )
 OBSERVABILITY_RUN_ID = f"airflow-observability-{RUN_ID_SAFE}"
+ANOMALY_DETECTION_RUN_ID = f"airflow-anomaly-{RUN_ID_SAFE}"
 
 DEFAULT_DATASET_PROFILE = "sample"
 DEFAULT_PRODUCER_MAX_ROWS = "0"
@@ -25,9 +26,13 @@ DEFAULT_WAREHOUSE_LOADER_MAX_MESSAGES = "72"
 DEFAULT_CONSUMER_PROGRESS_INTERVAL = "1000"
 DEFAULT_WAREHOUSE_LOADER_PROGRESS_INTERVAL = "1000"
 DEFAULT_PRODUCER_SEND_DELAY_MS = "0"
+DEFAULT_ANOMALY_DETECTION_LIMIT = "1000"
 DATA_CONTRACT_PATH = f"{PROJECT_DIR}/contracts/iot_raw_log_contract.yml"
 DATA_CONTRACT_SUMMARY_PATH = (
     f"{PROJECT_DIR}/docs/data-contract-validation-local.json"
+)
+ANOMALY_DETECTION_SUMMARY_PATH = (
+    f"{PROJECT_DIR}/docs/anomaly-detection-local.json"
 )
 
 
@@ -84,6 +89,10 @@ PRODUCER_SEND_DELAY_MS = get_env_value(
     "PRODUCER_SEND_DELAY_MS",
     DEFAULT_PRODUCER_SEND_DELAY_MS,
 )
+ANOMALY_DETECTION_LIMIT = get_env_value(
+    "ANOMALY_DETECTION_LIMIT",
+    DEFAULT_ANOMALY_DETECTION_LIMIT,
+)
 GO_PRODUCER_ENV = format_compose_env(
     {
         "DATASET_PROFILE": DATASET_PROFILE,
@@ -126,6 +135,7 @@ It is designed for manual local execution only:
 - warehouse-table truncation without touching Airflow metadata
 - raw data contract validation before producer execution
 - unique Kafka consumer group ids for each Airflow `run_id`
+- rule-based anomaly detection after warehouse loading with warehouse persistence
 - default sample-safe dataset mode settings with optional medium-profile overrides through environment variables
 
 The DAG does **not** start the Streamlit dashboard and does **not** add any cloud or production orchestration.
@@ -245,6 +255,25 @@ with DAG(
             + WAREHOUSE_LOADER_ENV
             + " "
             "warehouse-loader"
+        ),
+        execution_timeout=timedelta(minutes=10),
+    )
+
+    run_anomaly_detection = BashOperator(
+        task_id="run_anomaly_detection",
+        bash_command=project_command(
+            dedent(
+                f"""
+                export COMPOSE_PROJECT_NAME={shlex.quote(COMPOSE_PROJECT_NAME)}
+                export COMPOSE_FILE={shlex.quote(COMPOSE_FILE)}
+                python scripts/run_anomaly_detection.py \
+                    --limit {shlex.quote(ANOMALY_DETECTION_LIMIT)} \
+                    --ensure-table \
+                    --write-db \
+                    --run-id {shlex.quote(ANOMALY_DETECTION_RUN_ID)} \
+                    --output-json {shlex.quote(ANOMALY_DETECTION_SUMMARY_PATH)}
+                """
+            ).strip()
         ),
         execution_timeout=timedelta(minutes=10),
     )
@@ -384,6 +413,7 @@ with DAG(
         >> run_go_producer
         >> run_python_consumer
         >> run_warehouse_loader
+        >> run_anomaly_detection
         >> run_dbt_run
         >> run_dbt_test
         >> run_spark_device_features

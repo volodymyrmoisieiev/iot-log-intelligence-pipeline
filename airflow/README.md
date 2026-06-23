@@ -12,6 +12,7 @@ This Airflow setup is intentionally local-development only:
 - it generates unique Kafka consumer and loader group ids per Airflow run
 - it runs Spark through the existing local `spark-batch` Docker Compose service in local Docker mode only
 - it uploads Spark device features to local MinIO and validates uploaded objects through the existing local object-storage services
+- it runs anomaly detection after warehouse loading and persists anomaly rows into PostgreSQL
 - it runs the observability writer after the pipeline outputs are available and validates observability rows in PostgreSQL
 - it does not add AWS, Terraform, CI/CD, deployment logic, authentication, or real credentials
 - it does not start the Streamlit dashboard from Airflow
@@ -26,6 +27,7 @@ Stage 7 gives this repository a local orchestration layer so you can:
 - verify Airflow itself with a smoke DAG
 - trigger the existing local data pipeline from the Airflow UI
 - rerun the pipeline more safely for demos by resetting local Kafka runtime state and truncating only the warehouse pipeline tables
+- persist rule-based anomalies into `iot_anomalies` after warehouse loading
 - run the PySpark device feature engineering job after dbt, validate that Parquet output exists, upload that output to local MinIO, validate uploaded objects, write observability metrics, and validate observability rows
 
 ## Folder layout
@@ -159,6 +161,7 @@ Dataset-mode defaults in this DAG:
 - `WAREHOUSE_LOADER_MAX_MESSAGES=72`
 - `CONSUMER_PROGRESS_INTERVAL=1000`
 - `WAREHOUSE_LOADER_PROGRESS_INTERVAL=1000`
+- `ANOMALY_DETECTION_LIMIT=1000`
 
 These defaults keep the existing local DAG behavior sample-safe. You can override them in your shell before starting Airflow when you intentionally want a `medium` validation run.
 
@@ -172,6 +175,7 @@ Task order:
 - `run_go_producer`
 - `run_python_consumer`
 - `run_warehouse_loader`
+- `run_anomaly_detection`
 - `run_dbt_run`
 - `run_dbt_test`
 - `run_spark_device_features`
@@ -193,6 +197,7 @@ What each orchestration task does:
 - `run_go_producer` also passes `DATASET_PROFILE`, `PRODUCER_MAX_ROWS`, and `PRODUCER_SEND_DELAY_MS`
 - `run_python_consumer` processes a bounded batch of local Kafka messages with a unique consumer group id per DAG run and passes `CONSUMER_MAX_MESSAGES` plus `CONSUMER_PROGRESS_INTERVAL`
 - `run_warehouse_loader` loads processed and invalid records into PostgreSQL with a unique loader group id per DAG run and passes `WAREHOUSE_LOADER_MAX_MESSAGES` plus `WAREHOUSE_LOADER_PROGRESS_INTERVAL`
+- `run_anomaly_detection` runs `scripts/run_anomaly_detection.py` inside the Airflow container after warehouse loading, uses `--ensure-table` plus `--write-db`, persists results into `iot_anomalies`, writes `docs/anomaly-detection-local.json`, and passes an Airflow-derived run id together with `ANOMALY_DETECTION_LIMIT`
 - `run_dbt_run` executes existing dbt models
 - `run_dbt_test` executes existing dbt tests
 - `run_spark_device_features` runs `python /app/jobs/device_features_job.py` through `spark-batch`
@@ -207,6 +212,7 @@ The Streamlit dashboard is intentionally not started by this DAG.
 Airflow metadata tables are intentionally not truncated or reset by this DAG.
 Spark output remains local Parquet output that is uploaded into local MinIO only; it is not loaded into PostgreSQL by Airflow and it is not sent to production AWS S3.
 Kafka alert messages remain append-only, so repeated DAG runs create separate observability run ids and may append additional topic messages.
+The anomaly detection JSON summary path `docs/anomaly-detection-local.json` is git-ignored and can be regenerated safely during repeated local DAG runs.
 
 Raw-contract input path mapping inside Airflow uses `/opt/project`:
 
@@ -266,6 +272,7 @@ Expected successful local result:
 - `start_object_storage` brings up local MinIO and bucket initialization successfully
 - `upload_spark_features_to_minio` uploads Spark Parquet output to `iot-data-lake`
 - `validate_minio_spark_features_upload` succeeds after finding at least one uploaded `.parquet` object under `spark/device_features/latest/`
+- `run_anomaly_detection` succeeds and writes anomaly rows into `iot_anomalies`
 - `run_observability_writer` succeeds
 - `validate_observability_output` succeeds
 
@@ -283,6 +290,7 @@ Recommended sample-mode values:
 - `WAREHOUSE_LOADER_MAX_MESSAGES=72`
 - `CONSUMER_PROGRESS_INTERVAL=1000`
 - `WAREHOUSE_LOADER_PROGRESS_INTERVAL=1000`
+- `ANOMALY_DETECTION_LIMIT=1000`
 
 ### Prepare a medium dataset
 
@@ -303,6 +311,7 @@ $env:CONSUMER_MAX_MESSAGES = "1000"
 $env:WAREHOUSE_LOADER_MAX_MESSAGES = "1000"
 $env:CONSUMER_PROGRESS_INTERVAL = "250"
 $env:WAREHOUSE_LOADER_PROGRESS_INTERVAL = "250"
+$env:ANOMALY_DETECTION_LIMIT = "1000"
 docker compose up -d airflow-postgres airflow-init
 docker compose up -d airflow-webserver airflow-scheduler
 ```
@@ -316,6 +325,7 @@ docker compose build spark-batch
 Recommended medium-mode guidance:
 
 - keep `PRODUCER_MAX_ROWS`, `CONSUMER_MAX_MESSAGES`, and `WAREHOUSE_LOADER_MAX_MESSAGES` aligned so the consumer and loader expect the same number of records the producer will send
+- increase `ANOMALY_DETECTION_LIMIT` only when you intentionally want the DAG to scan more warehouse rows for anomaly persistence
 - use unique Airflow-triggered run ids as usual; the DAG already derives unique Kafka group ids from `run_id`
 - keep `full` dataset mode for manual local or cloud-style validation only, not CI
 
@@ -337,6 +347,12 @@ Trigger the DAG manually from CLI:
 
 ```powershell
 docker compose run --rm airflow-webserver airflow dags trigger iot_local_pipeline_dag
+```
+
+Test only the anomaly task:
+
+```powershell
+docker compose run --rm airflow-webserver airflow tasks test iot_local_pipeline_dag run_anomaly_detection 2024-01-01
 ```
 
 Validate row counts after a run:
@@ -425,6 +441,13 @@ docker compose up -d airflow-postgres airflow-init airflow-webserver airflow-sch
 - inspect quality-check rows with `docker exec -e PGPASSWORD=iot_password -i iot-postgres psql -U iot_user -d iot_logs -P pager=off -c "SELECT run_id, check_name, check_status, severity FROM pipeline_quality_checks WHERE run_id LIKE 'airflow-observability-%' ORDER BY created_at DESC LIMIT 10;"`
 - if alerts were generated, remember topic `iot_pipeline_alerts` is append-only and repeated runs may add more Kafka messages
 
+### Anomaly detection task fails
+
+- run `docker compose run --rm airflow-webserver airflow tasks test iot_local_pipeline_dag run_anomaly_detection 2024-01-01`
+- rerun the script directly with `.\.venv-observability\Scripts\python.exe .\scripts\run_anomaly_detection.py --limit 100 --ensure-table --write-db --output-json docs/anomaly-detection-local.json`
+- inspect anomaly rows with `docker exec -e PGPASSWORD=iot_password -i iot-postgres psql -U iot_user -d iot_logs -P pager=off -c "SELECT run_id, rule_name, severity, COUNT(*) FROM iot_anomalies GROUP BY run_id, rule_name, severity ORDER BY run_id DESC, COUNT(*) DESC;"`
+- confirm `ANOMALY_DETECTION_LIMIT` is not accidentally set to an unexpected value before starting Airflow
+
 ### Kafka offsets or repeated runs are confusing
 
 - Stage 7C uses unique consumer and loader group ids per `run_id`
@@ -459,6 +482,7 @@ docker compose exec airflow-webserver airflow dags show iot_local_pipeline_dag
 docker compose run --rm airflow-webserver python -m py_compile /opt/airflow/dags/iot_local_pipeline_dag.py
 docker compose run --rm airflow-webserver airflow tasks list iot_local_pipeline_dag
 docker compose run --rm airflow-webserver airflow tasks test iot_local_pipeline_dag validate_raw_data_contract 2024-01-01
+docker compose run --rm airflow-webserver airflow tasks test iot_local_pipeline_dag run_anomaly_detection 2024-01-01
 docker compose run --build --rm observability-writer --run-id airflow-readme-validation --publish-alerts
 ```
 
@@ -470,6 +494,7 @@ Manual UI verification:
 - trigger `iot_local_pipeline_dag`
 - confirm `validate_raw_data_contract` succeeds before `run_go_producer`
 - confirm every task reaches `success`
+- confirm `run_anomaly_detection` succeeds after `run_warehouse_loader`
 - confirm `run_dbt_test` reports `53` passing tests
 - confirm `run_spark_device_features` succeeds
 - confirm `validate_spark_device_features_output` succeeds

@@ -121,3 +121,6 @@ docs/performance/results/*.json
 
 # Data contract validator artifacts
 docs/data-contract-validation-local.json
+
+# Anomaly detection local artifacts
+docs/anomaly-detection-local.json
