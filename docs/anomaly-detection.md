@@ -1,6 +1,6 @@
 # Anomaly Detection / Suspicious Traffic Detection
 
-Stage 18 introduces a local anomaly-detection layer for processed IoT logs. Stage 18A added the standalone rule-based job and local validation workflow. Stage 18B extends that foundation by persisting anomaly results into PostgreSQL warehouse table `iot_anomalies`, while still keeping the existing runtime pipeline unchanged.
+Stage 18 introduces a local anomaly-detection layer for processed IoT logs. Stage 18A added the standalone rule-based job and local validation workflow. Stage 18B extends that foundation by persisting anomaly results into PostgreSQL warehouse table `iot_anomalies`. Stage 18C now integrates anomaly detection into the local Airflow pipeline after warehouse loading.
 
 ## What Stage 18 is for
 
@@ -16,8 +16,8 @@ At this stage, anomaly detection is intentionally local-first and safe by defaul
 
 Stage 18 still does not:
 
-- change the Go producer, Python consumer, warehouse loader, dbt, Spark, or Airflow runtime behavior
-- change runtime orchestration or downstream analytics models yet
+- change the Go producer, Python consumer, warehouse loader, dbt, Spark, MinIO, Terraform, benchmark, or data contract runtime logic
+- add cloud or production anomaly orchestration
 
 ## Why rule-based anomaly detection comes before ML
 
@@ -28,9 +28,9 @@ Rule-based detection is useful before ML because it gives a fast, explainable ba
 - thresholds and suspicious-value lists are easy to tune before investing in feature engineering or model training
 - the output can later become labeled input, QA feedback, or benchmark data for future ML stages
 
-This keeps Stage 18A and 18B simple and transparent while the rest of the local data platform stays stable.
+This keeps Stage 18A, 18B, and 18C simple and transparent while the rest of the local data platform stays stable.
 
-## Stage 18A/18B rules
+## Stage 18A/18B/18C rules
 
 The Stage 18A job lives at [`scripts/run_anomaly_detection.py`](../scripts/run_anomaly_detection.py).
 
@@ -144,6 +144,18 @@ Run with table creation check and warehouse persistence:
 .\.venv-observability\Scripts\python.exe .\scripts\run_anomaly_detection.py --limit 100 --ensure-table --write-db --output-json docs/anomaly-detection-local.json
 ```
 
+Airflow integration now runs the same script automatically after `run_warehouse_loader` and before downstream dbt, Spark, MinIO, and observability tasks. The DAG task writes a git-ignored local summary to `docs/anomaly-detection-local.json` and persists anomalies into `iot_anomalies`.
+
+Override the Airflow scan size by setting:
+
+```powershell
+$env:ANOMALY_DETECTION_LIMIT = "2500"
+docker compose up -d airflow-postgres airflow-init
+docker compose up -d airflow-webserver airflow-scheduler
+```
+
+If you do not override it, the Airflow DAG uses `ANOMALY_DETECTION_LIMIT=1000`.
+
 Verbose example:
 
 ```powershell
@@ -178,6 +190,8 @@ Example write command:
 ```powershell
 .\.venv-observability\Scripts\python.exe .\scripts\run_anomaly_detection.py --limit 100 --ensure-table --write-db --run-id stage18b-validation --output-json docs/anomaly-detection-local.json
 ```
+
+Airflow uses the same write path with an Airflow-derived run id shaped like `airflow-anomaly-...`, so anomaly rows from DAG runs can be isolated from manual runs through `run_id`.
 
 ## How to inspect inserted anomalies
 
@@ -223,14 +237,32 @@ The repository ignores the common local output path:
 
 - `docs/anomaly-detection-local.json`
 
+## Airflow integration in Stage 18C
+
+Stage 18C adds task `run_anomaly_detection` to `airflow/dags/iot_local_pipeline_dag.py`.
+
+Airflow behavior:
+
+- runs after `run_warehouse_loader`
+- runs before downstream analytical and quality-oriented tasks such as dbt, Spark, MinIO validation, and observability writing
+- calls `scripts/run_anomaly_detection.py`
+- passes `--ensure-table`
+- passes `--write-db`
+- passes `--limit` from `ANOMALY_DETECTION_LIMIT`, default `1000`
+- writes local summary file `docs/anomaly-detection-local.json`
+- uses an Airflow-derived `run_id` so DAG-created anomaly rows can be traced back to a run context
+
+Because the summary path is already ignored by Git, repeated local Airflow runs can regenerate that JSON safely.
+
 ## How Stage 18A leads into Stage 18B and 18C
 
 Stage 18A establishes the local detection logic and rule semantics first.
 
-Planned next steps:
+How the stage sequence now fits together:
 
+- Stage 18A proves the rules locally
 - Stage 18B persists anomaly results into additive warehouse storage for repeatable inspection
-- Stage 18C can orchestrate anomaly detection inside Airflow after the current warehouse and analytics steps are complete
+- Stage 18C orchestrates anomaly detection inside Airflow after the warehouse step and before downstream analytics and quality tasks
 
 That sequencing keeps the repository safe:
 
