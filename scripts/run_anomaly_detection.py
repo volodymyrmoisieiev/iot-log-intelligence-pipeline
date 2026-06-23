@@ -5,7 +5,8 @@ Stage 18A intentionally avoids external Python dependencies. The standard
 library does not provide a PostgreSQL client, so this script shells out to
 `docker compose exec -T postgres psql ...` and parses CSV output from `psql`.
 That keeps the job dependency-free while still working with the repository's
-local Docker Compose PostgreSQL service.
+local Docker Compose PostgreSQL service. Stage 18B extends the same approach
+to optional warehouse persistence into `iot_anomalies`.
 """
 
 from __future__ import annotations
@@ -25,6 +26,8 @@ from typing import Any
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+ANOMALIES_TABLE_SQL_PATH = PROJECT_ROOT / "storage" / "postgres" / "init" / "04_create_iot_anomalies.sql"
+ANOMALIES_TABLE_CONTAINER_SQL_PATH = "/docker-entrypoint-initdb.d/04_create_iot_anomalies.sql"
 DEFAULT_POSTGRES_HOST = "localhost"
 DEFAULT_POSTGRES_PORT = "5432"
 DEFAULT_POSTGRES_DB = "iot_logs"
@@ -89,7 +92,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Preview anomalies without any database writes. Stage 18A is read-only.",
+        help="Preview anomalies without any database writes.",
+    )
+    parser.add_argument(
+        "--write-db",
+        action="store_true",
+        help="Insert detected anomalies into the iot_anomalies warehouse table.",
+    )
+    parser.add_argument(
+        "--run-id",
+        help="Optional run id. Defaults to a generated UTC timestamp-based id.",
+    )
+    parser.add_argument(
+        "--ensure-table",
+        action="store_true",
+        help="Ensure the iot_anomalies table exists before continuing.",
     )
     parser.add_argument(
         "--verbose",
@@ -111,6 +128,10 @@ def get_connection_settings() -> dict[str, str]:
 
 def normalize_host(host: str) -> str:
     return "127.0.0.1" if host.strip().lower() == "localhost" else host.strip()
+
+
+def generate_run_id() -> str:
+    return "anomaly-detection-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
 def build_copy_query(limit: int) -> str:
@@ -138,8 +159,8 @@ COPY (
 """.strip()
 
 
-def fetch_recent_rows(limit: int, settings: dict[str, str], verbose: bool) -> list[ProcessedLogRow]:
-    command = [
+def build_psql_command(settings: dict[str, str]) -> list[str]:
+    return [
         "docker",
         "compose",
         "exec",
@@ -160,19 +181,33 @@ def fetch_recent_rows(limit: int, settings: dict[str, str], verbose: bool) -> li
         settings["user"],
         "-d",
         settings["db"],
-        "-c",
-        build_copy_query(limit),
     ]
 
+ 
+def redact_command(command: list[str]) -> str:
+    return " ".join(
+        part for part in command if not part.startswith("PGPASSWORD=")
+    )
+
+
+def run_psql(
+    settings: dict[str, str],
+    extra_args: list[str],
+    *,
+    input_text: str | None = None,
+    verbose: bool,
+    operation_name: str,
+) -> subprocess.CompletedProcess[str]:
+    command = build_psql_command(settings) + extra_args
     if verbose:
-        redacted_command = [part for part in command if not part.startswith("PGPASSWORD=")]
-        print("Running PostgreSQL query via docker compose exec:")
-        print(" ".join(redacted_command))
+        print(f"Running PostgreSQL {operation_name} via docker compose exec:")
+        print(redact_command(command))
 
     try:
         result = subprocess.run(
             command,
             cwd=PROJECT_ROOT,
+            input=input_text,
             capture_output=True,
             text=True,
             check=False,
@@ -188,10 +223,19 @@ def fetch_recent_rows(limit: int, settings: dict[str, str], verbose: bool) -> li
         if "is not running" in stderr.lower():
             guidance = " Start PostgreSQL first with `docker compose up -d postgres`."
         raise RuntimeError(
-            "Failed to read from processed_iot_logs via Docker Compose and psql. "
+            f"Failed to complete PostgreSQL {operation_name} via Docker Compose and psql. "
             f"{stderr}{guidance}"
         )
+    return result
 
+
+def fetch_recent_rows(limit: int, settings: dict[str, str], verbose: bool) -> list[ProcessedLogRow]:
+    result = run_psql(
+        settings=settings,
+        extra_args=["-c", build_copy_query(limit)],
+        verbose=verbose,
+        operation_name="read query",
+    )
     reader = csv.DictReader(io.StringIO(result.stdout))
     rows: list[ProcessedLogRow] = []
     for raw_row in reader:
@@ -357,16 +401,103 @@ def build_anomaly(
     )
 
 
-def build_summary(rows: list[ProcessedLogRow], anomalies: list[AnomalyRecord], dry_run: bool) -> dict[str, Any]:
+def ensure_anomalies_table(settings: dict[str, str], verbose: bool) -> None:
+    if not ANOMALIES_TABLE_SQL_PATH.is_file():
+        raise FileNotFoundError(
+            f"Anomaly table SQL file not found: {ANOMALIES_TABLE_SQL_PATH}"
+        )
+    run_psql(
+        settings=settings,
+        extra_args=["-v", "ON_ERROR_STOP=1", "-f", ANOMALIES_TABLE_CONTAINER_SQL_PATH],
+        verbose=verbose,
+        operation_name="table ensure",
+    )
+
+
+def serialize_anomalies_for_copy(run_id: str, anomalies: list[AnomalyRecord]) -> str:
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, lineterminator="\n")
+    writer.writerow(
+        [
+            "run_id",
+            "source_row_id",
+            "event_timestamp",
+            "device_id",
+            "rule_name",
+            "severity",
+            "reason",
+            "score",
+        ]
+    )
+    for anomaly in anomalies:
+        writer.writerow(
+            [
+                run_id,
+                "" if anomaly.source_row_id is None else str(anomaly.source_row_id),
+                anomaly.event_timestamp,
+                anomaly.device_id,
+                anomaly.rule_name,
+                anomaly.severity,
+                anomaly.reason,
+                anomaly.score,
+            ]
+        )
+    return buffer.getvalue()
+
+
+def write_anomalies_to_db(
+    settings: dict[str, str],
+    run_id: str,
+    anomalies: list[AnomalyRecord],
+    verbose: bool,
+) -> int:
+    if not anomalies:
+        return 0
+
+    copy_payload = serialize_anomalies_for_copy(run_id=run_id, anomalies=anomalies)
+    copy_sql = """
+COPY iot_anomalies (
+    run_id,
+    source_row_id,
+    event_timestamp,
+    device_id,
+    rule_name,
+    severity,
+    reason,
+    score
+) FROM STDIN WITH (FORMAT CSV, HEADER TRUE, NULL '')
+""".strip()
+    run_psql(
+        settings=settings,
+        extra_args=["-c", copy_sql],
+        input_text=copy_payload,
+        verbose=verbose,
+        operation_name="anomaly insert",
+    )
+    return len(anomalies)
+
+
+def build_summary(
+    *,
+    run_id: str,
+    rows: list[ProcessedLogRow],
+    anomalies: list[AnomalyRecord],
+    dry_run: bool,
+    write_db: bool,
+    inserted_rows: int,
+) -> dict[str, Any]:
     rule_counts = Counter(anomaly.rule_name for anomaly in anomalies)
     severity_counts = Counter(anomaly.severity for anomaly in anomalies)
     affected_rows = {anomaly.source_row_id for anomaly in anomalies if anomaly.source_row_id is not None}
 
     return {
+        "run_id": run_id,
         "dry_run": dry_run,
+        "write_db": write_db,
         "rows_scanned": len(rows),
         "anomalies_detected": len(anomalies),
         "rows_with_anomalies": len(affected_rows),
+        "inserted_rows": inserted_rows,
         "anomalies_by_rule": dict(sorted(rule_counts.items())),
         "anomalies_by_severity": dict(sorted(severity_counts.items())),
     }
@@ -374,10 +505,13 @@ def build_summary(rows: list[ProcessedLogRow], anomalies: list[AnomalyRecord], d
 
 def print_summary(summary: dict[str, Any], anomalies: list[AnomalyRecord], verbose: bool) -> None:
     print("Anomaly detection summary")
+    print(f"Run id: {summary['run_id']}")
     print(f"Dry run: {'yes' if summary['dry_run'] else 'no'}")
+    print(f"Write to DB: {'yes' if summary['write_db'] else 'no'}")
     print(f"Rows scanned: {summary['rows_scanned']}")
     print(f"Anomalies detected: {summary['anomalies_detected']}")
     print(f"Rows with anomalies: {summary['rows_with_anomalies']}")
+    print(f"Inserted rows: {summary['inserted_rows']}")
     print("Anomalies by rule:")
     if summary["anomalies_by_rule"]:
         for rule_name, count in summary["anomalies_by_rule"].items():
@@ -406,14 +540,17 @@ def write_json_report(
     output_path: Path,
     settings: dict[str, str],
     limit: int,
+    run_id: str,
     dry_run: bool,
+    write_db: bool,
     summary: dict[str, Any],
     anomalies: list[AnomalyRecord],
 ) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "mode": "dry-run" if dry_run else "read-only",
+        "run_id": run_id,
+        "mode": "dry-run" if dry_run else "write-db" if write_db else "read-only",
         "limit": limit,
         "connection": {
             "host": settings["host"],
@@ -434,23 +571,56 @@ def main() -> int:
     if args.limit <= 0:
         print("Error: --limit must be a positive integer.", file=sys.stderr)
         return 1
+    if args.dry_run and args.write_db:
+        print("Error: --dry-run cannot be combined with --write-db.", file=sys.stderr)
+        return 1
+    if args.dry_run and args.ensure_table:
+        print("Error: --dry-run cannot be combined with --ensure-table.", file=sys.stderr)
+        return 1
 
     try:
         settings = get_connection_settings()
+        run_id = args.run_id or generate_run_id()
+        if args.ensure_table:
+            ensure_anomalies_table(settings=settings, verbose=args.verbose)
         rows = fetch_recent_rows(limit=args.limit, settings=settings, verbose=args.verbose)
         anomalies = detect_anomalies(rows)
-        summary = build_summary(rows=rows, anomalies=anomalies, dry_run=args.dry_run)
+        inserted_rows = 0
+        if args.write_db:
+            inserted_rows = write_anomalies_to_db(
+                settings=settings,
+                run_id=run_id,
+                anomalies=anomalies,
+                verbose=args.verbose,
+            )
+        summary = build_summary(
+            run_id=run_id,
+            rows=rows,
+            anomalies=anomalies,
+            dry_run=args.dry_run,
+            write_db=args.write_db,
+            inserted_rows=inserted_rows,
+        )
         print_summary(summary=summary, anomalies=anomalies, verbose=args.verbose)
 
         if args.dry_run:
             print("Dry-run mode confirms that no database writes are attempted.")
+        elif args.write_db:
+            print(f"Inserted anomaly rows into iot_anomalies: {inserted_rows}")
+        else:
+            print("Read-only mode confirms that no database writes were attempted.")
+
+        if args.ensure_table:
+            print("Ensured iot_anomalies table exists.")
 
         if output_path is not None:
             write_json_report(
                 output_path=output_path,
                 settings=settings,
                 limit=args.limit,
+                run_id=run_id,
                 dry_run=args.dry_run,
+                write_db=args.write_db,
                 summary=summary,
                 anomalies=anomalies,
             )

@@ -1,23 +1,23 @@
 # Anomaly Detection / Suspicious Traffic Detection
 
-Stage 18 introduces a local anomaly-detection layer for processed IoT logs. Stage 18A is the foundation only: it adds a standalone rule-based job, documents the rules, and supports local dry-run validation without changing the current runtime pipeline. Later stages can persist detections, expose them in analytics, and orchestrate them with Airflow.
+Stage 18 introduces a local anomaly-detection layer for processed IoT logs. Stage 18A added the standalone rule-based job and local validation workflow. Stage 18B extends that foundation by persisting anomaly results into PostgreSQL warehouse table `iot_anomalies`, while still keeping the existing runtime pipeline unchanged.
 
 ## What Stage 18 is for
 
 The Stage 18 goal is to identify suspicious or outlier behavior in curated IoT traffic that has already passed the existing Kafka, consumer, warehouse, dbt, Spark, and observability foundations.
 
-At this stage, anomaly detection is intentionally local and read-only:
+At this stage, anomaly detection is intentionally local-first and safe by default:
 
 - it scans recent rows from `processed_iot_logs`
 - it applies lightweight heuristics
 - it prints a console summary
 - it can write a local JSON report for inspection
+- it can optionally persist anomaly rows into `iot_anomalies`
 
-Stage 18A does not:
+Stage 18 still does not:
 
-- write anomaly rows back into PostgreSQL
 - change the Go producer, Python consumer, warehouse loader, dbt, Spark, or Airflow runtime behavior
-- add new warehouse tables yet
+- change runtime orchestration or downstream analytics models yet
 
 ## Why rule-based anomaly detection comes before ML
 
@@ -28,9 +28,9 @@ Rule-based detection is useful before ML because it gives a fast, explainable ba
 - thresholds and suspicious-value lists are easy to tune before investing in feature engineering or model training
 - the output can later become labeled input, QA feedback, or benchmark data for future ML stages
 
-This keeps Stage 18A simple and transparent while the rest of the local data platform stays stable.
+This keeps Stage 18A and 18B simple and transparent while the rest of the local data platform stays stable.
 
-## Stage 18A rules
+## Stage 18A/18B rules
 
 The Stage 18A job lives at [`scripts/run_anomaly_detection.py`](../scripts/run_anomaly_detection.py).
 
@@ -64,7 +64,7 @@ Each anomaly record includes:
 
 ## Why the script uses Docker Compose and `psql`
 
-Python's standard library does not include a PostgreSQL client like `psycopg2`. Stage 18A keeps the script dependency-free, so it does not add a new package just for database access.
+Python's standard library does not include a PostgreSQL client like `psycopg2`. Stage 18A and 18B keep the script dependency-free, so they do not add a new package just for database access.
 
 Instead, the script shells out to:
 
@@ -84,9 +84,29 @@ The script reads these environment variables and falls back to local defaults:
 - `POSTGRES_USER`, default `iot_user`
 - `POSTGRES_PASSWORD`, default `iot_password`
 
-Those values are forwarded to `psql` when the script queries `processed_iot_logs`.
+Those values are forwarded to `psql` when the script queries `processed_iot_logs` and, if requested, inserts rows into `iot_anomalies`.
 
-## How to run Stage 18A locally
+## Ensuring the `iot_anomalies` table exists
+
+Stage 18B adds warehouse SQL file [`storage/postgres/init/04_create_iot_anomalies.sql`](../storage/postgres/init/04_create_iot_anomalies.sql).
+
+On a fresh PostgreSQL Docker volume, that file can be picked up automatically from `/docker-entrypoint-initdb.d` during first-time initialization. If your local PostgreSQL volume already exists, use one of these safe options:
+
+Run the SQL file manually through Docker Compose:
+
+```powershell
+docker compose exec -T postgres psql -U iot_user -d iot_logs -f /docker-entrypoint-initdb.d/04_create_iot_anomalies.sql
+```
+
+Or let the anomaly detection script ensure the table:
+
+```powershell
+.\.venv-observability\Scripts\python.exe .\scripts\run_anomaly_detection.py --ensure-table --limit 100
+```
+
+The script uses `CREATE TABLE IF NOT EXISTS` and `CREATE INDEX IF NOT EXISTS`, so this step is idempotent.
+
+## How to run Stage 18 locally
 
 Validate Docker Compose first:
 
@@ -112,6 +132,18 @@ Run a local dry-run against the latest 100 rows and write a JSON report:
 .\.venv-observability\Scripts\python.exe .\scripts\run_anomaly_detection.py --dry-run --limit 100 --output-json docs/anomaly-detection-local.json
 ```
 
+Run without DB writes but with the default generated `run_id`:
+
+```powershell
+.\.venv-observability\Scripts\python.exe .\scripts\run_anomaly_detection.py --limit 100 --output-json docs/anomaly-detection-local.json
+```
+
+Run with table creation check and warehouse persistence:
+
+```powershell
+.\.venv-observability\Scripts\python.exe .\scripts\run_anomaly_detection.py --limit 100 --ensure-table --write-db --output-json docs/anomaly-detection-local.json
+```
+
 Verbose example:
 
 ```powershell
@@ -120,20 +152,59 @@ Verbose example:
 
 ## What dry-run means
 
-For Stage 18A, dry-run means the job performs anomaly detection without attempting any database writes or pipeline mutations.
+For Stage 18, dry-run means the job performs anomaly detection without attempting any database writes or pipeline mutations.
 
-The script is already read-only in this stage, so `--dry-run` is mainly an explicit safety flag and validation mode:
+The script is still safe by default in the sense that it does not insert anomaly rows unless `--write-db` is passed. `--dry-run` is the strongest explicit no-write mode:
 
 - it still reads recent rows from `processed_iot_logs`
 - it still evaluates the rules
 - it still prints the console summary
 - it can still write an optional local JSON file
+- it does not ensure tables
+- it does not insert rows into `iot_anomalies`
+
+## Writing anomalies into PostgreSQL
+
+When `--write-db` is used, the script inserts each detected anomaly into `iot_anomalies`.
+
+Important behavior:
+
+- the default behavior remains read-only unless `--write-db` is passed
+- each execution gets a `run_id`; you can provide one explicitly through `--run-id` or let the script generate a UTC timestamp-based value
+- multiple anomaly rows can be created from one source `processed_iot_logs` row because a single event can match several rules at once
+
+Example write command:
+
+```powershell
+.\.venv-observability\Scripts\python.exe .\scripts\run_anomaly_detection.py --limit 100 --ensure-table --write-db --run-id stage18b-validation --output-json docs/anomaly-detection-local.json
+```
+
+## How to inspect inserted anomalies
+
+Check how many anomaly rows exist:
+
+```powershell
+docker compose exec -T postgres psql -U iot_user -d iot_logs -c "SELECT COUNT(*) FROM iot_anomalies;"
+```
+
+Check anomaly distribution by rule and severity:
+
+```powershell
+docker compose exec -T postgres psql -U iot_user -d iot_logs -c "SELECT rule_name, severity, COUNT(*) FROM iot_anomalies GROUP BY rule_name, severity ORDER BY COUNT(*) DESC;"
+```
+
+Inspect one run id:
+
+```powershell
+docker compose exec -T postgres psql -U iot_user -d iot_logs -c "SELECT run_id, source_row_id, device_id, rule_name, severity, score, created_at FROM iot_anomalies WHERE run_id = 'stage18b-validation' ORDER BY created_at DESC, id DESC LIMIT 20;"
+```
 
 ## What the JSON output contains
 
 When `--output-json` is provided, the script writes a local report that includes:
 
 - generation timestamp
+- `run_id`
 - execution mode
 - scan limit
 - non-secret connection metadata
@@ -158,11 +229,11 @@ Stage 18A establishes the local detection logic and rule semantics first.
 
 Planned next steps:
 
-- Stage 18B can persist anomaly results into additive warehouse structures, SQL views, or dbt-facing reporting layers
+- Stage 18B persists anomaly results into additive warehouse storage for repeatable inspection
 - Stage 18C can orchestrate anomaly detection inside Airflow after the current warehouse and analytics steps are complete
 
 That sequencing keeps the repository safe:
 
 - Stage 18A proves the rules locally
-- Stage 18B adds warehouse visibility
+- Stage 18B adds warehouse visibility and run-level persistence
 - Stage 18C adds orchestration only after the logic is stable
