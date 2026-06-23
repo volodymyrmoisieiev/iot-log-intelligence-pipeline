@@ -4,7 +4,7 @@
 
 IoT Log Intelligence Pipeline is a portfolio project focused on end-to-end data engineering for IoT logs: ingestion, processing, storage, transformation, and analytics.
 
-The repository is currently at Stage 17C, with a working local Kafka stack, a Go producer, a Python consumer validation layer, a local PostgreSQL warehouse foundation, a warehouse loader service, dbt staging models, dbt analytics marts on top of PostgreSQL, an optional Snowflake-ready dbt target for future cloud warehouse integration, a polished Streamlit dashboard for local analytics, a Streamlit observability monitoring section, safer repeatable local Apache Airflow orchestration for the existing pipeline steps, a lightweight GitHub Actions CI workflow for repository validation, tests, dbt project validation, Airflow DAG validation, and Terraform validation, a local PySpark batch-processing foundation with a device-level feature engineering job that runs inside the local Airflow pipeline, a local MinIO-based S3-compatible object storage foundation, a local uploader that sends Spark device-feature Parquet output into MinIO, Airflow integration that uploads and validates those MinIO objects as part of the local DAG, an AWS-ready Terraform foundation, Terraform S3 data lake definitions for future AWS storage, an observability schema foundation for pipeline audit history, quality checks, and alerts, a local observability writer that persists warehouse-derived metrics into those audit tables, can optionally publish alert events to Kafka, runs near the end of the local Airflow DAG, dataset profile support that now extends through producer, consumer, loader, and the local Airflow runbook for `sample`, `medium`, and `full` style validation runs, a local performance benchmark foundation for benchmark execution, Markdown summary generation, and bottleneck-focused analysis, plus a Stage 17 data contract foundation, local CSV validation tooling, and an Airflow pre-check for the raw IoT log schema.
+The repository is currently at Stage 18A, with a working local Kafka stack, a Go producer, a Python consumer validation layer, a local PostgreSQL warehouse foundation, a warehouse loader service, dbt staging models, dbt analytics marts on top of PostgreSQL, an optional Snowflake-ready dbt target for future cloud warehouse integration, a polished Streamlit dashboard for local analytics, a Streamlit observability monitoring section, safer repeatable local Apache Airflow orchestration for the existing pipeline steps, a lightweight GitHub Actions CI workflow for repository validation, tests, dbt project validation, Airflow DAG validation, and Terraform validation, a local PySpark batch-processing foundation with a device-level feature engineering job that runs inside the local Airflow pipeline, a local MinIO-based S3-compatible object storage foundation, a local uploader that sends Spark device-feature Parquet output into MinIO, Airflow integration that uploads and validates those MinIO objects as part of the local DAG, an AWS-ready Terraform foundation, Terraform S3 data lake definitions for future AWS storage, an observability schema foundation for pipeline audit history, quality checks, and alerts, a local observability writer that persists warehouse-derived metrics into those audit tables, can optionally publish alert events to Kafka, runs near the end of the local Airflow DAG, dataset profile support that now extends through producer, consumer, loader, and the local Airflow runbook for `sample`, `medium`, and `full` style validation runs, a local performance benchmark foundation for benchmark execution, Markdown summary generation, and bottleneck-focused analysis, a Stage 17 data contract foundation, local CSV validation tooling, an Airflow pre-check for the raw IoT log schema, and a Stage 18A local rule-based anomaly detection foundation for suspicious traffic review.
 
 ## 2. Planned local architecture
 
@@ -131,6 +131,7 @@ iot-log-intelligence-pipeline/
 - Stage 15: dataset processing modes
 - Stage 16: performance / load testing
 - Stage 17: data contracts + stronger validation
+- Stage 18: anomaly detection / suspicious traffic detection
 
 ## 7. Stage 1 local setup
 
@@ -1081,13 +1082,32 @@ What this stage provides:
 - a local CSV validator at `scripts/validate_data_contract.py`
 - an Airflow pre-check task that fails early on raw-data contract violations
 
-## 38. Security note
+## 38. Stage 18 Anomaly Detection / Suspicious Traffic Detection
+
+Stage 18 starts the repository's anomaly-detection work for processed IoT logs. Stage 18A adds a local, standalone rule-based detection foundation that scans recent `processed_iot_logs` rows, applies explainable suspicious-traffic heuristics, prints a clear summary, and can write a local JSON report without changing the existing runtime pipeline behavior.
+
+What this stage provides:
+
+- a local anomaly detection job at `scripts/run_anomaly_detection.py`
+- rule-based checks for packet size, duration, status, attack labels, and unusual protocols
+- a focused runbook at [docs/anomaly-detection.md](docs/anomaly-detection.md)
+- local JSON report output support for manual review
+
+What this stage does not do:
+
+- it does not change Go producer runtime logic
+- it does not change Python consumer runtime logic
+- it does not change warehouse-loader runtime logic
+- it does not change Airflow DAG logic
+- it does not change dbt, Spark, MinIO, Terraform, benchmark, or data contract behavior
+
+## 39. Security note
 
 Do not commit real credentials, production secrets, or sensitive data. Use environment variables and secret management outside the repository.
 
-## 39. Current stage
+## 40. Current stage
 
-Stage 17C includes:
+Stage 18A includes:
 
 - repository skeleton and documentation
 - local Docker Compose services for Kafka, Kafka topic initialization, and Kafka UI
@@ -1131,5 +1151,7 @@ Stage 17C includes:
 - a Stage 17 data contract guide at `docs/data-contracts.md`
 - a local raw-data contract validator at `scripts/validate_data_contract.py`
 - an Airflow `validate_raw_data_contract` task before `run_go_producer`
+- a local anomaly detection helper at `scripts/run_anomaly_detection.py`
+- a Stage 18 anomaly detection guide at `docs/anomaly-detection.md`
 
-Airflow now orchestrates the existing local producer, consumer, warehouse loader, dbt flow, PySpark device feature engineering step, local Spark output validation, local MinIO upload, and MinIO object validation through one manual DAG that is safer for repeated demo runs and better documented for local development. Spark still runs only in local Docker mode, and MinIO remains a local S3-compatible target only rather than production AWS S3. Stage 12C keeps the Terraform S3 data lake definitions that mirror the local MinIO pattern for future AWS use and adds CI validation for them, but no AWS resources are created until `terraform apply` is run, and neither `terraform plan` nor `terraform apply` is part of CI. Full dbt execution and full Airflow orchestration are still verified locally through Docker Compose or Airflow, while CI remains limited to safe validation checks. Stage 15A adds the dataset profile contract, Stage 15B adds the local preparation script, Stage 15C brings those profiles into the Go producer, Stage 15D makes larger consumer and loader validation runs clearer and safer, Stage 15E carries those settings into the local Airflow DAG and runbook without changing downstream modeling logic, Stage 16A adds the first local benchmark helper for measuring those profile-specific runs, Stage 16B adds human-readable benchmark summary generation on top of the JSON benchmark artifacts, Stage 16C adds benchmark result analysis on top of those local outputs, Stage 16D finalizes the Performance / Load Testing workflow as PR-ready documentation, Stage 17A adds the first formal raw-data contract foundation for stronger future validation, Stage 17B adds local raw-CSV contract validation tooling on top of that foundation, and Stage 17C makes that validation a real Airflow pipeline guardrail before producer execution.
+Airflow now orchestrates the existing local producer, consumer, warehouse loader, dbt flow, PySpark device feature engineering step, local Spark output validation, local MinIO upload, and MinIO object validation through one manual DAG that is safer for repeated demo runs and better documented for local development. Spark still runs only in local Docker mode, and MinIO remains a local S3-compatible target only rather than production AWS S3. Stage 12C keeps the Terraform S3 data lake definitions that mirror the local MinIO pattern for future AWS use and adds CI validation for them, but no AWS resources are created until `terraform apply` is run, and neither `terraform plan` nor `terraform apply` is part of CI. Full dbt execution and full Airflow orchestration are still verified locally through Docker Compose or Airflow, while CI remains limited to safe validation checks. Stage 15A adds the dataset profile contract, Stage 15B adds the local preparation script, Stage 15C brings those profiles into the Go producer, Stage 15D makes larger consumer and loader validation runs clearer and safer, Stage 15E carries those settings into the local Airflow DAG and runbook without changing downstream modeling logic, Stage 16A adds the first local benchmark helper for measuring those profile-specific runs, Stage 16B adds human-readable benchmark summary generation on top of the JSON benchmark artifacts, Stage 16C adds benchmark result analysis on top of those local outputs, Stage 16D finalizes the Performance / Load Testing workflow as PR-ready documentation, Stage 17A adds the first formal raw-data contract foundation for stronger future validation, Stage 17B adds local raw-CSV contract validation tooling on top of that foundation, Stage 17C makes that validation a real Airflow pipeline guardrail before producer execution, and Stage 18A adds a local rule-based anomaly detection foundation that remains standalone until later warehouse and Airflow integration stages.
