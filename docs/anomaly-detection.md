@@ -162,6 +162,18 @@ Verbose example:
 .\.venv-observability\Scripts\python.exe .\scripts\run_anomaly_detection.py --limit 250 --verbose
 ```
 
+## Stage 18 workflow
+
+Stage 18 now works as one connected flow:
+
+- `scripts/run_anomaly_detection.py` reads recent rows from `processed_iot_logs`
+- matching rules produce one or more anomaly records per source row when needed
+- `--write-db` persists those records into `iot_anomalies`
+- Airflow task `run_anomaly_detection` runs the same logic after `run_warehouse_loader`
+- repeated local runs append new rows with different `run_id` values instead of overwriting older results
+
+For the full PR-ready Stage 18 explanation, portfolio framing, rule summary, and SQL inspection examples, see [docs/stage-18-anomaly-detection.md](./stage-18-anomaly-detection.md).
+
 ## What dry-run means
 
 For Stage 18, dry-run means the job performs anomaly detection without attempting any database writes or pipeline mutations.
@@ -211,6 +223,12 @@ Inspect one run id:
 
 ```powershell
 docker compose exec -T postgres psql -U iot_user -d iot_logs -c "SELECT run_id, source_row_id, device_id, rule_name, severity, score, created_at FROM iot_anomalies WHERE run_id = 'stage18b-validation' ORDER BY created_at DESC, id DESC LIMIT 20;"
+```
+
+Check the latest anomaly run quickly:
+
+```powershell
+docker compose exec -T postgres psql -U iot_user -d iot_logs -c "WITH latest_run AS (SELECT run_id FROM iot_anomalies ORDER BY created_at DESC LIMIT 1) SELECT a.run_id, a.rule_name, a.severity, COUNT(*) AS anomaly_rows FROM iot_anomalies a JOIN latest_run lr ON a.run_id = lr.run_id GROUP BY a.run_id, a.rule_name, a.severity ORDER BY anomaly_rows DESC;"
 ```
 
 ## What the JSON output contains
