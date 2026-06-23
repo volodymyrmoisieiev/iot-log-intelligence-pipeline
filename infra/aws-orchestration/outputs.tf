@@ -48,13 +48,18 @@ output "lambda_package_output_path" {
 }
 
 output "step_functions_role_name" {
-  description = "Planned Step Functions execution role name."
+  description = "Planned Step Functions orchestration execution role name."
   value       = local.step_functions_role_name
 }
 
 output "step_functions_role_arn" {
-  description = "Step Functions execution role ARN when IAM role creation is enabled or an override is supplied."
+  description = "Step Functions orchestration execution role ARN when IAM role creation is enabled or an override is supplied."
   value       = local.step_functions_state_machine_role
+}
+
+output "step_functions_target_lambda_arn" {
+  description = "Resolved metadata-validator Lambda target used by the Step Functions foundation."
+  value       = local.step_functions_lambda_target_arn
 }
 
 output "cloudwatch_log_group_name" {
@@ -68,18 +73,18 @@ output "cloudwatch_log_group_arn" {
 }
 
 output "step_function_name" {
-  description = "Planned Step Functions placeholder state machine name."
+  description = "Planned Step Functions orchestration state machine name."
   value       = local.step_function_name
 }
 
 output "step_function_definition" {
-  description = "JSON definition for the Stage 19A placeholder state machine."
+  description = "JSON definition for the Stage 19C orchestration state machine."
   value       = local.step_function_definition
 }
 
 output "step_function_state_machine_arn" {
-  description = "Step Functions placeholder ARN when creation is enabled."
-  value       = try(aws_sfn_state_machine.placeholder[0].arn, null)
+  description = "Step Functions orchestration state machine ARN when the foundation is enabled."
+  value       = try(aws_sfn_state_machine.orchestration[0].arn, null)
 }
 
 output "safety_switches" {
@@ -87,8 +92,8 @@ output "safety_switches" {
   value = {
     create_iam_roles                 = var.create_iam_roles
     create_cloudwatch_log_group      = var.create_cloudwatch_log_group
-    create_step_function_placeholder = var.create_step_function_placeholder
     enable_lambda_foundation         = var.enable_lambda_foundation
+    enable_step_functions_foundation = var.enable_step_functions_foundation
     enable_step_function_logging     = var.enable_step_function_logging
   }
 }

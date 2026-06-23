@@ -76,8 +76,8 @@ variable "cloudwatch_log_group_arn_override" {
   default     = ""
 }
 
-variable "create_step_function_placeholder" {
-  description = "When true, create a minimal Step Functions placeholder state machine for future orchestration stages."
+variable "enable_step_functions_foundation" {
+  description = "When true, create the Stage 19C Step Functions orchestration foundation."
   type        = bool
   default     = false
 }
@@ -89,7 +89,7 @@ variable "enable_step_function_logging" {
 }
 
 variable "step_function_type" {
-  description = "Step Functions workflow type for the placeholder state machine."
+  description = "Step Functions workflow type for the orchestration state machine."
   type        = string
   default     = "STANDARD"
 
@@ -100,7 +100,13 @@ variable "step_function_type" {
 }
 
 variable "step_functions_role_arn" {
-  description = "Optional pre-existing IAM role ARN for the placeholder Step Functions state machine."
+  description = "Optional pre-existing IAM role ARN for the Step Functions orchestration state machine."
+  type        = string
+  default     = ""
+}
+
+variable "metadata_validator_lambda_arn_override" {
+  description = "Optional pre-existing ARN for the metadata-validator Lambda when the local Lambda foundation is disabled."
   type        = string
   default     = ""
 }
@@ -195,7 +201,7 @@ variable "cloudwatch_log_group_name_override" {
 }
 
 variable "step_function_name_override" {
-  description = "Optional explicit name for the placeholder Step Functions state machine."
+  description = "Optional explicit name for the Step Functions orchestration state machine."
   type        = string
   default     = ""
 }

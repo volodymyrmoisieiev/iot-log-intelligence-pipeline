@@ -51,11 +51,27 @@ Step Functions will become the AWS-native orchestration layer for cloud-side flo
 
 This complements the current local Airflow orchestration rather than replacing it immediately.
 
+Stage 19C adds the first real state-machine foundation for that flow. The workflow is intentionally small and readable:
+
+- `ValidateInputMetadata` invokes the metadata-validator Lambda
+- `CheckValidationResult` branches on `is_valid`
+- `ProcessingPlaceholder` reserves the next ETL slot for future AWS work
+- `Success` ends the happy path
+- `ValidationFailed` ends the invalid-input path
+
+This mirrors the local Airflow DAG concept at a cloud-control-plane level: validate first, branch on outcome, then continue to processing only when the input is safe enough to move forward.
+
 Why Lambda comes before Step Functions in this design:
 
 - it provides a lightweight first-pass validation step before broader orchestration begins
 - it keeps simple file metadata rules isolated from the state-machine logic
 - it gives future Step Functions branches a clean, structured validation result to act on
+
+Why Step Functions is useful here:
+
+- it coordinates multiple cloud-side steps without forcing all orchestration into a single Lambda
+- it prepares a clean bridge toward future Glue, Spark, warehouse, or lakehouse tasks
+- it provides a natural AWS analogue to the orchestration role that Airflow plays locally
 
 ### CloudWatch logs and alarms
 
@@ -78,6 +94,12 @@ For the Stage 19B validator Lambda, the IAM policy is intentionally limited to:
 - CloudWatch Logs permissions for the Lambda log group
 - read-only access to the configured S3 data lake prefixes
 - no write permissions to the lake and no broad wildcard admin rights
+
+For the Stage 19C Step Functions foundation, the IAM policy is intentionally limited to:
+
+- Step Functions logging-related permissions only when logging is enabled
+- Lambda invocation permissions only for the metadata-validator Lambda used in this workflow
+- no broad S3 write access and no hardcoded account-specific identities
 
 ## What Stage 19A implements
 
@@ -107,29 +129,32 @@ Stage 19B extends that foundation with a cost-safe Lambda and IAM layer. It adds
 
 This stage still does not require or perform a real AWS deployment.
 
-## Planned Stage 19B, 19C, and 19D scope
+## What Stage 19C implements
 
-### Stage 19C
+Stage 19C extends the AWS control-plane foundation with:
 
-Stage 19C can connect the new validator foundation to a richer orchestration layer:
+- a Terraform-native Step Functions state machine definition
+- a validation-first orchestration path from S3-style input to success/failure
+- least-privilege Step Functions IAM for invoking the metadata-validator Lambda
+- an example Step Functions input payload at `infra/aws-orchestration/examples/step-functions-input.json`
+- a cost-safe state machine resource behind `enable_step_functions_foundation = false`
 
-- Step Functions invocation of the metadata-validator Lambda
-- validation-success and validation-failure branches in the state machine
-- CloudWatch metric filters
-- CloudWatch alarms
-- clearer run-state monitoring and failure notifications for cloud-side orchestration
+This stage still does not require or perform a real AWS deployment.
+
+## Planned Stage 19D scope
 
 ### Stage 19D
 
 Stage 19D can focus on safer cross-module integration and deployment readiness:
 
 - wiring orchestration inputs to the Stage 12 S3 outputs
+- replacing the processing placeholder with concrete ETL, storage, or warehouse steps
 - environment-specific tfvars examples
 - CI validation expansion for the orchestration root module
 
 ## Cost-safety notes
 
-Stage 19A and 19B are designed to stay cheap and safe:
+Stage 19A, 19B, and 19C are designed to stay cheap and safe:
 
 - no credentials are committed
 - no account IDs are hardcoded
@@ -138,16 +163,18 @@ Stage 19A and 19B are designed to stay cheap and safe:
 - real AWS resource creation still requires an intentional future `terraform apply`
 - Lambda, Step Functions, IAM, and CloudWatch resource creation are off by default through boolean toggles
 
-## Local Lambda test flow
+## Local validation flow
 
-The Stage 19B validator can be tested locally before any AWS deployment work:
+The Stage 19B validator syntax can still be validated locally before any AWS deployment work:
 
 ```powershell
-python -m py_compile aws/lambda/iot_metadata_validator/handler.py
-python aws/lambda/iot_metadata_validator/handler.py
+.\.venv-observability\Scripts\python.exe -m py_compile .\aws\lambda\iot_metadata_validator\handler.py
+terraform -chdir=infra/aws-orchestration fmt
+terraform -chdir=infra/aws-orchestration init -backend=false
+terraform -chdir=infra/aws-orchestration validate
 ```
 
-The sample event file under `aws/lambda/iot_metadata_validator/sample_event.json` exercises the S3-style event path and prints a structured validation result.
+The sample event file under `aws/lambda/iot_metadata_validator/sample_event.json` and the Step Functions example input under `infra/aws-orchestration/examples/step-functions-input.json` give future stages a shared S3-style payload shape for local review and testing.
 
 ## Why this is portfolio-relevant for Data Engineering
 
@@ -156,6 +183,6 @@ This stage matters for a data engineering portfolio because it shows more than l
 - clear separation between data-plane and control-plane design
 - readiness for cloud orchestration patterns used in real production platforms
 - infrastructure-as-code discipline with safe defaults
-- understanding of serverless orchestration, observability, IAM boundaries, event validation, and data lake integration
+- understanding of serverless orchestration, observability, IAM boundaries, event validation, branching workflow design, and data lake integration
 
 In practice, this makes the project look closer to a real migration path from local development toward cloud-native data platform architecture.
