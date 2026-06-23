@@ -17,6 +17,20 @@ The current benchmark scope is intentionally narrow:
 
 The helper script lives at `scripts/run_performance_benchmark.py`.
 
+## Stage 16 Workflow
+
+Stage 16 now works as a simple local measurement loop:
+
+1. run a benchmark for `sample`, `medium`, or `full`
+2. optionally generate a Markdown summary for one run
+3. analyze one or many JSON benchmark files for timing patterns and bottlenecks
+
+Useful companion docs:
+
+- [Benchmark summary example](benchmark-summary-example.md)
+- [Performance analysis example](performance-analysis-example.md)
+- [Stage 16 performance/load testing runbook](stage-16-performance-load-testing.md)
+
 ## Before You Run a Benchmark
 
 Start the local dependencies that the benchmarked services expect:
