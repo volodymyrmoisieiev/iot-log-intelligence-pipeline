@@ -1,0 +1,15 @@
+{
+  "Records": [
+    {
+      "eventName": "ObjectCreated:Put",
+      "s3": {
+        "bucket": {
+          "name": "iot-data-lake"
+        },
+        "object": {
+          "key": "raw/2026/06/23/sample_iot_logs.jsonl"
+        }
+      }
+    }
+  ]
+}
