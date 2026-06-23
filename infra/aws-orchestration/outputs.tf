@@ -18,13 +18,33 @@ output "data_lake_reference" {
 }
 
 output "lambda_execution_role_name" {
-  description = "Planned Lambda execution role name."
+  description = "Planned metadata-validator Lambda execution role name."
   value       = local.lambda_execution_role_name
 }
 
 output "lambda_execution_role_arn" {
-  description = "Lambda execution role ARN when IAM role creation is enabled."
-  value       = try(aws_iam_role.lambda_execution[0].arn, null)
+  description = "Metadata-validator Lambda execution role ARN when IAM role creation is enabled or an override is supplied."
+  value       = local.lambda_function_role_arn
+}
+
+output "lambda_function_name" {
+  description = "Planned metadata-validator Lambda function name."
+  value       = local.lambda_function_name
+}
+
+output "lambda_function_arn" {
+  description = "Metadata-validator Lambda function ARN when the Lambda foundation is enabled."
+  value       = try(aws_lambda_function.metadata_validator[0].arn, null)
+}
+
+output "lambda_source_directory" {
+  description = "Resolved local source directory for the metadata-validator Lambda package."
+  value       = local.lambda_source_directory
+}
+
+output "lambda_package_output_path" {
+  description = "Planned local archive path for the metadata-validator Lambda package when the foundation is enabled."
+  value       = var.enable_lambda_foundation ? data.archive_file.lambda_validator[0].output_path : null
 }
 
 output "step_functions_role_name" {
@@ -63,11 +83,12 @@ output "step_function_state_machine_arn" {
 }
 
 output "safety_switches" {
-  description = "Creation toggles that keep Stage 19A cost-safe by default."
+  description = "Creation toggles that keep the AWS orchestration foundation cost-safe by default."
   value = {
     create_iam_roles                 = var.create_iam_roles
     create_cloudwatch_log_group      = var.create_cloudwatch_log_group
     create_step_function_placeholder = var.create_step_function_placeholder
+    enable_lambda_foundation         = var.enable_lambda_foundation
     enable_step_function_logging     = var.enable_step_function_logging
   }
 }

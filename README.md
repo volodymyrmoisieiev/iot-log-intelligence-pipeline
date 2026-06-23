@@ -4,7 +4,7 @@
 
 IoT Log Intelligence Pipeline is a portfolio project focused on end-to-end data engineering for IoT logs: ingestion, processing, storage, transformation, and analytics.
 
-The repository is currently at Stage 19A, with a working local Kafka stack, a Go producer, a Python consumer validation layer, a local PostgreSQL warehouse foundation, a warehouse loader service, dbt staging models, dbt analytics marts on top of PostgreSQL, an optional Snowflake-ready dbt target for future cloud warehouse integration, a polished Streamlit dashboard for local analytics, a Streamlit observability monitoring section, safer repeatable local Apache Airflow orchestration for the existing pipeline steps, a lightweight GitHub Actions CI workflow for repository validation, tests, dbt project validation, Airflow DAG validation, and Terraform validation, a local PySpark batch-processing foundation with a device-level feature engineering job that runs inside the local Airflow pipeline, a local MinIO-based S3-compatible object storage foundation, a local uploader that sends Spark device-feature Parquet output into MinIO, Airflow integration that uploads and validates those MinIO objects as part of the local DAG, an AWS-ready Terraform foundation, Terraform S3 data lake definitions for future AWS storage, an AWS cloud orchestration Terraform foundation for future Lambda, Step Functions, CloudWatch, IAM, and S3-integrated control-plane work, an observability schema foundation for pipeline audit history, quality checks, and alerts, a local observability writer that persists warehouse-derived metrics into those audit tables, can optionally publish alert events to Kafka, runs near the end of the local Airflow DAG, dataset profile support that now extends through producer, consumer, loader, and the local Airflow runbook for `sample`, `medium`, and `full` style validation runs, a local performance benchmark foundation for benchmark execution, Markdown summary generation, and bottleneck-focused analysis, a Stage 17 data contract foundation, local CSV validation tooling, an Airflow pre-check for the raw IoT log schema, and a Stage 18 anomaly detection foundation with a standalone script, warehouse persistence, Airflow integration, and final PR-ready documentation.
+The repository is currently at Stage 19B, with a working local Kafka stack, a Go producer, a Python consumer validation layer, a local PostgreSQL warehouse foundation, a warehouse loader service, dbt staging models, dbt analytics marts on top of PostgreSQL, an optional Snowflake-ready dbt target for future cloud warehouse integration, a polished Streamlit dashboard for local analytics, a Streamlit observability monitoring section, safer repeatable local Apache Airflow orchestration for the existing pipeline steps, a lightweight GitHub Actions CI workflow for repository validation, tests, dbt project validation, Airflow DAG validation, and Terraform validation, a local PySpark batch-processing foundation with a device-level feature engineering job that runs inside the local Airflow pipeline, a local MinIO-based S3-compatible object storage foundation, a local uploader that sends Spark device-feature Parquet output into MinIO, Airflow integration that uploads and validates those MinIO objects as part of the local DAG, an AWS-ready Terraform foundation, Terraform S3 data lake definitions for future AWS storage, an AWS cloud orchestration Terraform foundation for future Lambda, Step Functions, CloudWatch, IAM, and S3-integrated control-plane work, a local AWS Lambda metadata-validation foundation for cloud-side file intake, an observability schema foundation for pipeline audit history, quality checks, and alerts, a local observability writer that persists warehouse-derived metrics into those audit tables, can optionally publish alert events to Kafka, runs near the end of the local Airflow DAG, dataset profile support that now extends through producer, consumer, loader, and the local Airflow runbook for `sample`, `medium`, and `full` style validation runs, a local performance benchmark foundation for benchmark execution, Markdown summary generation, and bottleneck-focused analysis, a Stage 17 data contract foundation, local CSV validation tooling, an Airflow pre-check for the raw IoT log schema, and a Stage 18 anomaly detection foundation with a standalone script, warehouse persistence, Airflow integration, and final PR-ready documentation.
 
 ## 2. Planned local architecture
 
@@ -1110,12 +1110,13 @@ What this stage does not do:
 
 ## 39. Stage 19 AWS Cloud Orchestration Foundation
 
-Stage 19A adds a cloud-ready orchestration foundation on top of the existing AWS S3 Terraform work without migrating the local runtime pipeline to AWS yet.
+Stage 19B adds a cloud-ready orchestration and Lambda validation foundation on top of the existing AWS S3 Terraform work without migrating the local runtime pipeline to AWS yet.
 
 What this stage provides:
 
 - a new Terraform root at `infra/aws-orchestration/` for future Lambda, Step Functions, CloudWatch, IAM, and S3-linked orchestration work
 - shared naming, tagging, provider, and variable foundations for cloud-side orchestration resources
+- a local metadata-validator Lambda foundation under `aws/lambda/iot_metadata_validator/`
 - cost-safe placeholder structure with creation toggles disabled by default
 - focused architecture documentation at [docs/aws-cloud-orchestration.md](docs/aws-cloud-orchestration.md)
 
@@ -1131,13 +1132,15 @@ Do not commit real credentials, production secrets, or sensitive data. Use envir
 
 ## 41. Current stage
 
-Stage 19A includes everything from Stage 18D plus:
+Stage 19B includes everything from Stage 19A plus:
 
-- a new orchestration-focused Terraform foundation under `infra/aws-orchestration/`
-- optional IAM, CloudWatch, and Step Functions placeholder definitions that stay disabled by default for cost safety
-- a focused Stage 19 architecture guide at `docs/aws-cloud-orchestration.md`
+- a local metadata-validator Lambda source package under `aws/lambda/iot_metadata_validator/`
+- archive-based Terraform packaging for that Lambda source
+- least-privilege IAM for metadata-validator logging and read-only S3 access
+- a Lambda function resource that stays disabled by default behind `enable_lambda_foundation`
+- expanded Stage 19 documentation covering local Lambda testing and the next Step Functions integration step
 
-Stage 18D foundations remain in place, including:
+Stage 19A and Stage 18D foundations remain in place, including:
 
 - repository skeleton and documentation
 - local Docker Compose services for Kafka, Kafka topic initialization, and Kafka UI

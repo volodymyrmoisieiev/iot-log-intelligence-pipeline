@@ -46,12 +46,14 @@ variable "data_lake_prefixes" {
   default = [
     "raw/",
     "processed/",
+    "curated/",
+    "anomalies/",
     "spark/device_features/latest/",
   ]
 }
 
 variable "create_iam_roles" {
-  description = "When true, create minimal IAM execution roles for Lambda and Step Functions."
+  description = "When true, create minimal IAM execution roles for future orchestration resources even if the Lambda function itself stays disabled."
   type        = bool
   default     = false
 }
@@ -104,9 +106,80 @@ variable "step_functions_role_arn" {
 }
 
 variable "lambda_role_name_override" {
-  description = "Optional explicit name for the future Lambda execution role."
+  description = "Optional explicit name for the metadata-validator Lambda execution role."
   type        = string
   default     = ""
+}
+
+variable "lambda_execution_role_arn_override" {
+  description = "Optional pre-existing IAM role ARN for the metadata-validator Lambda function."
+  type        = string
+  default     = ""
+}
+
+variable "enable_lambda_foundation" {
+  description = "When true, create the Stage 19B Lambda metadata-validator foundation."
+  type        = bool
+  default     = false
+}
+
+variable "lambda_function_name_override" {
+  description = "Optional explicit name for the metadata-validator Lambda function."
+  type        = string
+  default     = ""
+}
+
+variable "lambda_description" {
+  description = "Description for the metadata-validator Lambda function."
+  type        = string
+  default     = "Stage 19B IoT metadata validator foundation."
+}
+
+variable "lambda_handler" {
+  description = "Handler entrypoint for the metadata-validator Lambda package."
+  type        = string
+  default     = "handler.lambda_handler"
+}
+
+variable "lambda_runtime" {
+  description = "Runtime for the metadata-validator Lambda function."
+  type        = string
+  default     = "python3.12"
+}
+
+variable "lambda_timeout_seconds" {
+  description = "Timeout in seconds for the metadata-validator Lambda function."
+  type        = number
+  default     = 30
+}
+
+variable "lambda_memory_size_mb" {
+  description = "Memory size in MB for the metadata-validator Lambda function."
+  type        = number
+  default     = 256
+}
+
+variable "lambda_architecture" {
+  description = "CPU architecture for the metadata-validator Lambda function."
+  type        = string
+  default     = "x86_64"
+
+  validation {
+    condition     = contains(["x86_64", "arm64"], var.lambda_architecture)
+    error_message = "lambda_architecture must be x86_64 or arm64."
+  }
+}
+
+variable "lambda_source_directory_override" {
+  description = "Optional override for the local metadata-validator Lambda source directory."
+  type        = string
+  default     = ""
+}
+
+variable "lambda_environment_variables" {
+  description = "Additional environment variables for the metadata-validator Lambda function."
+  type        = map(string)
+  default     = {}
 }
 
 variable "step_functions_role_name_override" {
