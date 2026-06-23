@@ -4,7 +4,7 @@
 
 IoT Log Intelligence Pipeline is a portfolio project focused on end-to-end data engineering for IoT logs: ingestion, processing, storage, transformation, and analytics.
 
-The repository is currently at Stage 15E, with a working local Kafka stack, a Go producer, a Python consumer validation layer, a local PostgreSQL warehouse foundation, a warehouse loader service, dbt staging models, dbt analytics marts on top of PostgreSQL, an optional Snowflake-ready dbt target for future cloud warehouse integration, a polished Streamlit dashboard for local analytics, a Streamlit observability monitoring section, safer repeatable local Apache Airflow orchestration for the existing pipeline steps, a lightweight GitHub Actions CI workflow for repository validation, tests, dbt project validation, Airflow DAG validation, and Terraform validation, a local PySpark batch-processing foundation with a device-level feature engineering job that runs inside the local Airflow pipeline, a local MinIO-based S3-compatible object storage foundation, a local uploader that sends Spark device-feature Parquet output into MinIO, Airflow integration that uploads and validates those MinIO objects as part of the local DAG, an AWS-ready Terraform foundation, Terraform S3 data lake definitions for future AWS storage, an observability schema foundation for pipeline audit history, quality checks, and alerts, a local observability writer that persists warehouse-derived metrics into those audit tables, can optionally publish alert events to Kafka, runs near the end of the local Airflow DAG, and dataset profile support that now extends through producer, consumer, loader, and the local Airflow runbook for `sample`, `medium`, and `full` style validation runs.
+The repository is currently at Stage 16A, with a working local Kafka stack, a Go producer, a Python consumer validation layer, a local PostgreSQL warehouse foundation, a warehouse loader service, dbt staging models, dbt analytics marts on top of PostgreSQL, an optional Snowflake-ready dbt target for future cloud warehouse integration, a polished Streamlit dashboard for local analytics, a Streamlit observability monitoring section, safer repeatable local Apache Airflow orchestration for the existing pipeline steps, a lightweight GitHub Actions CI workflow for repository validation, tests, dbt project validation, Airflow DAG validation, and Terraform validation, a local PySpark batch-processing foundation with a device-level feature engineering job that runs inside the local Airflow pipeline, a local MinIO-based S3-compatible object storage foundation, a local uploader that sends Spark device-feature Parquet output into MinIO, Airflow integration that uploads and validates those MinIO objects as part of the local DAG, an AWS-ready Terraform foundation, Terraform S3 data lake definitions for future AWS storage, an observability schema foundation for pipeline audit history, quality checks, and alerts, a local observability writer that persists warehouse-derived metrics into those audit tables, can optionally publish alert events to Kafka, runs near the end of the local Airflow DAG, dataset profile support that now extends through producer, consumer, loader, and the local Airflow runbook for `sample`, `medium`, and `full` style validation runs, plus a local performance benchmark foundation for comparing those dataset modes.
 
 ## 2. Planned local architecture
 
@@ -128,6 +128,7 @@ iot-log-intelligence-pipeline/
 - Stage 13: Snowflake-ready warehouse option
 - Stage 14: pipeline observability and data quality alerts
 - Stage 15: dataset processing modes
+- Stage 16: performance / load testing
 
 ## 7. Stage 1 local setup
 
@@ -1041,13 +1042,32 @@ Stage 15D adds progress-interval controls, clearer idle-timeout exits, and end-o
 
 Stage 15E wires dataset-mode settings into the local Airflow orchestration DAG and finalizes the Stage 15 runbook for sample-safe defaults plus intentional medium-profile overrides.
 
-## 36. Security note
+## 36. Stage 16A Performance / Load Testing
+
+Stage 16A starts the repository's performance and load-testing work with local benchmark tooling for the existing `sample`, `medium`, and `full` dataset profiles.
+
+What this stage provides:
+
+- a lightweight local benchmark helper at `scripts/run_performance_benchmark.py`
+- Docker Compose-based benchmark execution for the Go producer, Python consumer, and warehouse loader
+- JSON result capture under `docs/performance/results/`
+- a focused runbook at [docs/performance/README.md](docs/performance/README.md)
+
+What this stage does not do:
+
+- it does not change producer runtime logic
+- it does not change consumer runtime logic
+- it does not change warehouse-loader runtime logic
+- it does not change Airflow DAG logic
+- it does not change dbt, Spark, MinIO, or Terraform behavior
+
+## 37. Security note
 
 Do not commit real credentials, production secrets, or sensitive data. Use environment variables and secret management outside the repository.
 
-## 37. Current stage
+## 38. Current stage
 
-Stage 15E includes:
+Stage 16A includes:
 
 - repository skeleton and documentation
 - local Docker Compose services for Kafka, Kafka topic initialization, and Kafka UI
@@ -1082,5 +1102,7 @@ Stage 15E includes:
 - Go producer support for `DATASET_PROFILE`, `PRODUCER_INPUT_FILE` override precedence, and optional `PRODUCER_MAX_ROWS` limiting
 - safer Python consumer and warehouse-loader runtime controls for larger dataset validation runs, including progress logging and clearer summaries
 - Airflow DAG support for dataset-mode environment settings with sample-safe defaults and documented medium-profile overrides
+- a local benchmark helper that times producer, consumer, and warehouse-loader runs for the `sample`, `medium`, and `full` dataset profiles
+- a dedicated Stage 16 performance runbook and local JSON benchmark-result output path under `docs/performance/results/`
 
-Airflow now orchestrates the existing local producer, consumer, warehouse loader, dbt flow, PySpark device feature engineering step, local Spark output validation, local MinIO upload, and MinIO object validation through one manual DAG that is safer for repeated demo runs and better documented for local development. Spark still runs only in local Docker mode, and MinIO remains a local S3-compatible target only rather than production AWS S3. Stage 12C keeps the Terraform S3 data lake definitions that mirror the local MinIO pattern for future AWS use and adds CI validation for them, but no AWS resources are created until `terraform apply` is run, and neither `terraform plan` nor `terraform apply` is part of CI. Full dbt execution and full Airflow orchestration are still verified locally through Docker Compose or Airflow, while CI remains limited to safe validation checks. Stage 15A adds the dataset profile contract, Stage 15B adds the local preparation script, Stage 15C brings those profiles into the Go producer, Stage 15D makes larger consumer and loader validation runs clearer and safer, and Stage 15E carries those settings into the local Airflow DAG and runbook without changing downstream modeling logic.
+Airflow now orchestrates the existing local producer, consumer, warehouse loader, dbt flow, PySpark device feature engineering step, local Spark output validation, local MinIO upload, and MinIO object validation through one manual DAG that is safer for repeated demo runs and better documented for local development. Spark still runs only in local Docker mode, and MinIO remains a local S3-compatible target only rather than production AWS S3. Stage 12C keeps the Terraform S3 data lake definitions that mirror the local MinIO pattern for future AWS use and adds CI validation for them, but no AWS resources are created until `terraform apply` is run, and neither `terraform plan` nor `terraform apply` is part of CI. Full dbt execution and full Airflow orchestration are still verified locally through Docker Compose or Airflow, while CI remains limited to safe validation checks. Stage 15A adds the dataset profile contract, Stage 15B adds the local preparation script, Stage 15C brings those profiles into the Go producer, Stage 15D makes larger consumer and loader validation runs clearer and safer, Stage 15E carries those settings into the local Airflow DAG and runbook without changing downstream modeling logic, and Stage 16A adds the first local benchmark helper for measuring those profile-specific runs.

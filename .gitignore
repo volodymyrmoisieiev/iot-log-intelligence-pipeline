@@ -112,3 +112,7 @@ secrets/
 # Test artifacts
 .cache/
 coverage/
+
+# Performance benchmark artifacts
+docs/performance/results/*.json
+!docs/performance/results/.gitkeep
