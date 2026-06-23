@@ -13,6 +13,7 @@ The current benchmark scope is intentionally narrow:
 - warehouse loader timing
 - JSON result capture for local comparison
 - optional Markdown summary generation for human-readable reporting
+- optional benchmark result analysis across multiple JSON files
 
 The helper script lives at `scripts/run_performance_benchmark.py`.
 
@@ -48,6 +49,28 @@ Generate a local Markdown summary alongside the JSON result:
 ```
 
 That `benchmark-summary-local.md` file is a local artifact unless you intentionally decide to commit a specific result for portfolio evidence.
+
+## Analyze Local Benchmark Results
+
+Analyze every JSON result currently stored under `docs/performance/results`:
+
+```powershell
+.\.venv-observability\Scripts\python.exe .\scripts\analyze_performance_results.py --input docs/performance/results
+```
+
+Analyze one specific benchmark JSON file:
+
+```powershell
+.\.venv-observability\Scripts\python.exe .\scripts\analyze_performance_results.py --input docs/performance/results/benchmark_sample_72_rows_20260623T134754Z.json
+```
+
+Generate a local Markdown analysis report:
+
+```powershell
+.\.venv-observability\Scripts\python.exe .\scripts\analyze_performance_results.py --input docs/performance/results --output-md docs/performance/performance-analysis-local.md
+```
+
+That `performance-analysis-local.md` file is also a local artifact unless you intentionally choose to commit a selected report for portfolio evidence.
 
 ## Generate a Medium Dataset
 
@@ -107,5 +130,7 @@ Use the result files this way:
 - JSON result file: machine-readable benchmark artifact stored under `docs/performance/results/`
 - Markdown summary file: optional human-readable local summary such as `docs/performance/benchmark-summary-local.md`
 - committed example summary: [docs/performance/benchmark-summary-example.md](benchmark-summary-example.md), which shows how to read the generated output without committing local run artifacts
+- Markdown analysis file: optional multi-run analysis report such as `docs/performance/performance-analysis-local.md`
+- committed analysis example: [docs/performance/performance-analysis-example.md](performance-analysis-example.md), which explains how to read aggregated timings and bottlenecks
 
-Git is configured to ignore generated JSON benchmark results and the local `benchmark-summary-local.md` file while still allowing the folder structure and the committed example summary to remain in the repository.
+Git is configured to ignore generated JSON benchmark results plus local Markdown artifacts such as `benchmark-summary-local.md` and `performance-analysis-local.md` while still allowing the folder structure and committed example files to remain in the repository.
