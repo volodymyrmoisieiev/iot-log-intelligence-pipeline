@@ -133,8 +133,18 @@ The validator returns:
 - `1` when validation completes but one or more contract checks fail
 - `2` when there is a configuration or input problem, such as a missing CSV file, missing contract file, malformed contract structure, or invalid CLI argument values
 
-## How This Will Be Used In Stage 17C
+## How Stage 17C Uses The Contract
 
-Stage 17C can build on this local validator by wiring the same contract checks into a more repeatable validation workflow, such as pre-processing guardrails, orchestration steps, or CI-safe repository checks.
+Stage 17C wires the Stage 17B validator into `airflow/dags/iot_local_pipeline_dag.py` as a real pre-check task named `validate_raw_data_contract`.
 
-That later stage can focus on integration and enforcement scope because Stage 17A already defined the contract and Stage 17B already introduced the reusable local validation tool.
+That means Airflow now validates the selected raw CSV before `run_go_producer` starts. If contract validation fails, the DAG stops early and downstream producer, consumer, warehouse-loader, dbt, Spark, MinIO, and observability tasks do not run.
+
+Airflow uses these `/opt/project` path mappings for dataset profiles:
+
+- `sample` -> `/opt/project/data/samples/sample_iot_logs.csv`
+- `medium` -> `/opt/project/data/processed/medium_iot_logs.csv`
+- `full` -> `/opt/project/data/raw/full_iot_logs.csv`
+
+The Airflow validation task also writes a local summary file to `docs/data-contract-validation-local.json`. That artifact remains git-ignored so it can be regenerated during local orchestration runs without polluting commits.
+
+This Stage 17C integration turns the contract into a practical pipeline guardrail instead of a documentation-only or CLI-only step.

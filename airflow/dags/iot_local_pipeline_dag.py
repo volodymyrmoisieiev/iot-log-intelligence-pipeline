@@ -25,6 +25,10 @@ DEFAULT_WAREHOUSE_LOADER_MAX_MESSAGES = "72"
 DEFAULT_CONSUMER_PROGRESS_INTERVAL = "1000"
 DEFAULT_WAREHOUSE_LOADER_PROGRESS_INTERVAL = "1000"
 DEFAULT_PRODUCER_SEND_DELAY_MS = "0"
+DATA_CONTRACT_PATH = f"{PROJECT_DIR}/contracts/iot_raw_log_contract.yml"
+DATA_CONTRACT_SUMMARY_PATH = (
+    f"{PROJECT_DIR}/docs/data-contract-validation-local.json"
+)
 
 
 def get_env_value(key: str, default: str) -> str:
@@ -120,6 +124,7 @@ It is designed for manual local execution only:
 - no catchup
 - safe reset of Kafka runtime state between runs
 - warehouse-table truncation without touching Airflow metadata
+- raw data contract validation before producer execution
 - unique Kafka consumer group ids for each Airflow `run_id`
 - default sample-safe dataset mode settings with optional medium-profile overrides through environment variables
 
@@ -170,6 +175,39 @@ with DAG(
                 psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
                 -c "TRUNCATE TABLE processed_iot_logs, invalid_iot_logs RESTART IDENTITY;"
                 '
+                """
+            ).strip()
+        ),
+        execution_timeout=timedelta(minutes=5),
+    )
+
+    validate_raw_data_contract = BashOperator(
+        task_id="validate_raw_data_contract",
+        bash_command=project_command(
+            dedent(
+                f"""
+                dataset_profile={shlex.quote(DATASET_PROFILE)}
+
+                case "$dataset_profile" in
+                    sample)
+                        input_csv="/opt/project/data/samples/sample_iot_logs.csv"
+                        ;;
+                    medium)
+                        input_csv="/opt/project/data/processed/medium_iot_logs.csv"
+                        ;;
+                    full)
+                        input_csv="/opt/project/data/raw/full_iot_logs.csv"
+                        ;;
+                    *)
+                        echo "Unsupported DATASET_PROFILE for contract validation: $dataset_profile" >&2
+                        exit 1
+                        ;;
+                esac
+
+                python scripts/validate_data_contract.py \
+                    --contract {shlex.quote(DATA_CONTRACT_PATH)} \
+                    --input "$input_csv" \
+                    --summary-json {shlex.quote(DATA_CONTRACT_SUMMARY_PATH)}
                 """
             ).strip()
         ),
@@ -342,6 +380,7 @@ with DAG(
         >> reset_local_pipeline_state
         >> start_infrastructure
         >> truncate_warehouse_tables
+        >> validate_raw_data_contract
         >> run_go_producer
         >> run_python_consumer
         >> run_warehouse_loader
