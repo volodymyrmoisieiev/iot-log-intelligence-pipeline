@@ -52,18 +52,18 @@ The contract is stored here:
 
 That file is the Stage 17A source of truth for the raw IoT log CSV schema.
 
-## How This Will Be Used In Stage 17B
+## How Stage 17B Uses The Contract
 
-Stage 17B can build a validator that reads the contract and checks incoming raw datasets against it before deeper processing continues.
+Stage 17B adds a local validator script at `scripts/validate_data_contract.py`. It reads `contracts/iot_raw_log_contract.yml` and checks a raw CSV file against the documented schema before deeper processing continues.
 
-That later validation step can be used to:
+The local validator can be used to:
 
 - confirm all required columns exist
 - verify basic type and nullability expectations
 - catch obvious schema breaks earlier in the pipeline
 - produce clearer validation errors when the source dataset changes unexpectedly
 
-Stage 17A only prepares that foundation so Stage 17B can implement enforcement without inventing the rules at runtime.
+Stage 17A prepared the contract foundation, and Stage 17B adds the first local enforcement tool without changing producer, consumer, warehouse-loader, Airflow, dbt, Spark, MinIO, Terraform, or benchmark runtime behavior.
 
 ## Schema Validation vs Business And Data Quality Validation
 
@@ -87,3 +87,54 @@ In short:
 - business/data quality validation checks meaning, realism, and fitness for downstream use
 
 Both matter, but schema validation is the first line of defense and the focus of this Stage 17A foundation.
+
+## Running The Validator
+
+Validate the tracked sample dataset against the default contract:
+
+```powershell
+.\.venv-observability\Scripts\python.exe .\scripts\validate_data_contract.py --input .\data\samples\sample_iot_logs.csv
+```
+
+The validator supports these key arguments:
+
+- `--contract` defaults to `contracts/iot_raw_log_contract.yml`
+- `--input` is required and points to the CSV file being checked
+- `--max-errors` controls how many validation errors are recorded before the run stops early
+- `--summary-json` writes a machine-readable JSON summary report
+
+Allowed-value checks for fields such as `protocol` and `status` are matched case-insensitively so the validator can work with the current raw sample dataset while still enforcing the documented contract vocabulary.
+
+## Writing A JSON Summary
+
+Write a local JSON summary report while validating the sample dataset:
+
+```powershell
+.\.venv-observability\Scripts\python.exe .\scripts\validate_data_contract.py --input .\data\samples\sample_iot_logs.csv --summary-json docs/data-contract-validation-local.json
+```
+
+The JSON summary includes:
+
+- input path
+- contract path
+- rows checked
+- valid rows
+- invalid rows
+- errors
+- timestamp
+
+The local `docs/data-contract-validation-local.json` path is git-ignored so validation evidence can be generated repeatedly without polluting commits.
+
+## Exit Codes
+
+The validator returns:
+
+- `0` when validation passes
+- `1` when validation completes but one or more contract checks fail
+- `2` when there is a configuration or input problem, such as a missing CSV file, missing contract file, malformed contract structure, or invalid CLI argument values
+
+## How This Will Be Used In Stage 17C
+
+Stage 17C can build on this local validator by wiring the same contract checks into a more repeatable validation workflow, such as pre-processing guardrails, orchestration steps, or CI-safe repository checks.
+
+That later stage can focus on integration and enforcement scope because Stage 17A already defined the contract and Stage 17B already introduced the reusable local validation tool.
