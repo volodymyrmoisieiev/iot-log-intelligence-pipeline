@@ -62,6 +62,21 @@ output "step_functions_target_lambda_arn" {
   value       = local.step_functions_lambda_target_arn
 }
 
+output "step_function_monitor_target_arn" {
+  description = "Resolved Step Functions orchestration ARN used by CloudWatch monitoring and alarms."
+  value       = local.step_function_monitor_target_arn
+}
+
+output "lambda_log_group_name" {
+  description = "CloudWatch log group name for the metadata-validator Lambda."
+  value       = local.lambda_log_group_name
+}
+
+output "lambda_log_group_arn" {
+  description = "CloudWatch log group ARN for the metadata-validator Lambda when monitoring is enabled."
+  value       = try(aws_cloudwatch_log_group.lambda_metadata_validator[0].arn, null)
+}
+
 output "cloudwatch_log_group_name" {
   description = "Shared CloudWatch log group name for future orchestration workflows."
   value       = local.orchestration_log_group
@@ -70,6 +85,31 @@ output "cloudwatch_log_group_name" {
 output "cloudwatch_log_group_arn" {
   description = "Shared CloudWatch log group ARN when created or overridden."
   value       = local.step_function_log_group_arn
+}
+
+output "lambda_error_alarm_arn" {
+  description = "ARN of the metadata-validator Lambda error alarm when alarms are enabled."
+  value       = try(aws_cloudwatch_metric_alarm.lambda_errors[0].arn, null)
+}
+
+output "lambda_duration_alarm_arn" {
+  description = "ARN of the metadata-validator Lambda duration-risk alarm when alarms are enabled."
+  value       = try(aws_cloudwatch_metric_alarm.lambda_duration[0].arn, null)
+}
+
+output "step_functions_failed_alarm_arn" {
+  description = "ARN of the Step Functions failed-executions alarm when alarms are enabled."
+  value       = try(aws_cloudwatch_metric_alarm.step_functions_failed[0].arn, null)
+}
+
+output "step_functions_timed_out_alarm_arn" {
+  description = "ARN of the Step Functions timed-out-executions alarm when alarms are enabled."
+  value       = try(aws_cloudwatch_metric_alarm.step_functions_timed_out[0].arn, null)
+}
+
+output "validation_failure_placeholder_alarm_arn" {
+  description = "ARN of the placeholder validation-failure alarm when that optional alarm is enabled."
+  value       = try(aws_cloudwatch_metric_alarm.validation_failure_placeholder[0].arn, null)
 }
 
 output "step_function_name" {
@@ -92,6 +132,8 @@ output "safety_switches" {
   value = {
     create_iam_roles                 = var.create_iam_roles
     create_cloudwatch_log_group      = var.create_cloudwatch_log_group
+    enable_cloudwatch_monitoring     = var.enable_cloudwatch_monitoring
+    enable_cloudwatch_alarms         = var.enable_cloudwatch_alarms
     enable_lambda_foundation         = var.enable_lambda_foundation
     enable_step_functions_foundation = var.enable_step_functions_foundation
     enable_step_function_logging     = var.enable_step_function_logging

@@ -81,6 +81,16 @@ CloudWatch will provide cloud-native operational visibility:
 - future alarms for failed executions, retry spikes, or missing data windows
 - a foundation for cloud observability alongside the local observability work already in the repo
 
+Stage 19D turns that into a concrete monitoring foundation. It adds optional log-group management plus optional alarms for:
+
+- Lambda `Errors`
+- Lambda `Duration` as timeout-risk protection
+- Step Functions `ExecutionsFailed`
+- Step Functions `ExecutionsTimedOut`
+- a placeholder custom validation-failure alarm for a future emitted metric
+
+This is intentionally production-minded but still cost-safe: monitoring and alarms remain disabled by default until a future deployment stage explicitly enables them.
+
 ### IAM least privilege
 
 IAM is designed to stay narrow and explicit:
@@ -141,20 +151,33 @@ Stage 19C extends the AWS control-plane foundation with:
 
 This stage still does not require or perform a real AWS deployment.
 
-## Planned Stage 19D scope
+## What Stage 19D implements
 
-### Stage 19D
+Stage 19D extends that control-plane foundation with:
 
-Stage 19D can focus on safer cross-module integration and deployment readiness:
+- optional CloudWatch log groups for the metadata-validator Lambda and Step Functions workflow
+- optional CloudWatch alarms for Lambda errors and duration risk
+- optional CloudWatch alarms for Step Functions failed and timed-out executions
+- an optional placeholder validation-failure alarm for a future custom metric
+- safe Terraform outputs for log groups and alarm ARNs when resources are enabled
+
+This stage still does not require or perform a real AWS deployment.
+
+## Planned Stage 19E scope
+
+### Stage 19E
+
+Stage 19E can focus on safer cross-module integration and deployment readiness:
 
 - wiring orchestration inputs to the Stage 12 S3 outputs
 - replacing the processing placeholder with concrete ETL, storage, or warehouse steps
+- connecting CloudWatch alarms to SNS, incident-routing, or richer dashboards
 - environment-specific tfvars examples
 - CI validation expansion for the orchestration root module
 
 ## Cost-safety notes
 
-Stage 19A, 19B, and 19C are designed to stay cheap and safe:
+Stage 19A, 19B, 19C, and 19D are designed to stay cheap and safe:
 
 - no credentials are committed
 - no account IDs are hardcoded

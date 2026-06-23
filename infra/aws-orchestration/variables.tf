@@ -64,10 +64,70 @@ variable "create_cloudwatch_log_group" {
   default     = false
 }
 
+variable "enable_cloudwatch_monitoring" {
+  description = "When true, create CloudWatch monitoring log-group foundations for Lambda and Step Functions."
+  type        = bool
+  default     = false
+}
+
+variable "enable_cloudwatch_alarms" {
+  description = "When true, create CloudWatch alarms for the orchestration foundation."
+  type        = bool
+  default     = false
+}
+
 variable "cloudwatch_log_retention_days" {
   description = "Retention period for the shared CloudWatch log group if it is created."
   type        = number
   default     = 14
+}
+
+variable "cloudwatch_alarm_period_seconds" {
+  description = "Evaluation period in seconds for CloudWatch alarms in the orchestration foundation."
+  type        = number
+  default     = 300
+}
+
+variable "cloudwatch_alarm_evaluation_periods" {
+  description = "Number of evaluation periods used by CloudWatch alarms in the orchestration foundation."
+  type        = number
+  default     = 1
+}
+
+variable "lambda_error_alarm_threshold" {
+  description = "Threshold for the Lambda error alarm based on the AWS/Lambda Errors metric."
+  type        = number
+  default     = 1
+}
+
+variable "lambda_duration_alarm_threshold_ms" {
+  description = "Threshold in milliseconds for the Lambda duration alarm."
+  type        = number
+  default     = 25000
+}
+
+variable "step_functions_failed_executions_threshold" {
+  description = "Threshold for the Step Functions failed executions alarm."
+  type        = number
+  default     = 1
+}
+
+variable "step_functions_timed_out_executions_threshold" {
+  description = "Threshold for the Step Functions timed-out executions alarm."
+  type        = number
+  default     = 1
+}
+
+variable "enable_validation_failure_alarm_placeholder" {
+  description = "When true, create a placeholder CloudWatch alarm for a future custom validation-failure metric."
+  type        = bool
+  default     = false
+}
+
+variable "validation_failure_alarm_threshold" {
+  description = "Threshold for the placeholder validation-failure alarm based on a future custom metric."
+  type        = number
+  default     = 1
 }
 
 variable "cloudwatch_log_group_arn_override" {
@@ -101,6 +161,12 @@ variable "step_function_type" {
 
 variable "step_functions_role_arn" {
   description = "Optional pre-existing IAM role ARN for the Step Functions orchestration state machine."
+  type        = string
+  default     = ""
+}
+
+variable "step_function_state_machine_arn_override" {
+  description = "Optional pre-existing ARN for the Step Functions orchestration state machine when the local foundation is disabled."
   type        = string
   default     = ""
 }

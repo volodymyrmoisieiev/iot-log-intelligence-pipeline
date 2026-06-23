@@ -4,7 +4,7 @@ locals {
       project     = var.project_name
       environment = var.environment
       managed_by  = "terraform"
-      stage       = "19C"
+      stage       = "19D"
       component   = "aws-orchestration"
     },
     var.additional_tags
@@ -12,16 +12,19 @@ locals {
 
   name_prefix = join("-", compact([var.project_name, var.environment, "orchestration"]))
 
-  lambda_execution_role_name       = var.lambda_role_name_override != "" ? var.lambda_role_name_override : "${local.name_prefix}-lambda-role"
-  lambda_function_name             = var.lambda_function_name_override != "" ? var.lambda_function_name_override : "${local.name_prefix}-metadata-validator"
-  step_functions_role_name         = var.step_functions_role_name_override != "" ? var.step_functions_role_name_override : "${local.name_prefix}-step-functions-role"
-  orchestration_log_group          = var.cloudwatch_log_group_name_override != "" ? var.cloudwatch_log_group_name_override : "/aws/vendedlogs/states/${local.name_prefix}"
-  step_function_name               = var.step_function_name_override != "" ? var.step_function_name_override : "${local.name_prefix}-workflow"
-  lambda_source_directory          = var.lambda_source_directory_override != "" ? abspath(var.lambda_source_directory_override) : abspath("${path.module}/../../aws/lambda/iot_metadata_validator")
-  lambda_package_output_path       = "${path.module}/.terraform/${local.lambda_function_name}.zip"
-  lambda_log_group_name            = "/aws/lambda/${local.lambda_function_name}"
-  lambda_role_should_exist         = var.create_iam_roles || var.enable_lambda_foundation
-  step_functions_role_should_exist = var.create_iam_roles || var.enable_step_functions_foundation
+  lambda_execution_role_name          = var.lambda_role_name_override != "" ? var.lambda_role_name_override : "${local.name_prefix}-lambda-role"
+  lambda_function_name                = var.lambda_function_name_override != "" ? var.lambda_function_name_override : "${local.name_prefix}-metadata-validator"
+  step_functions_role_name            = var.step_functions_role_name_override != "" ? var.step_functions_role_name_override : "${local.name_prefix}-step-functions-role"
+  orchestration_log_group             = var.cloudwatch_log_group_name_override != "" ? var.cloudwatch_log_group_name_override : "/aws/vendedlogs/states/${local.name_prefix}"
+  step_function_name                  = var.step_function_name_override != "" ? var.step_function_name_override : "${local.name_prefix}-workflow"
+  lambda_source_directory             = var.lambda_source_directory_override != "" ? abspath(var.lambda_source_directory_override) : abspath("${path.module}/../../aws/lambda/iot_metadata_validator")
+  lambda_package_output_path          = "${path.module}/.terraform/${local.lambda_function_name}.zip"
+  lambda_log_group_name               = "/aws/lambda/${local.lambda_function_name}"
+  lambda_role_should_exist            = var.create_iam_roles || var.enable_lambda_foundation
+  step_functions_role_should_exist    = var.create_iam_roles || var.enable_step_functions_foundation
+  monitoring_log_groups_enabled       = var.create_cloudwatch_log_group || var.enable_cloudwatch_monitoring
+  validation_failure_metric_namespace = "Custom/IoTLogIntelligencePipeline"
+  validation_failure_metric_name      = "ValidationFailures"
 
   resolved_data_lake_bucket_name = var.existing_data_lake_bucket_name != "" ? var.existing_data_lake_bucket_name : var.data_lake_bucket_name
   resolved_data_lake_bucket_arn  = var.existing_data_lake_bucket_arn != "" ? var.existing_data_lake_bucket_arn : "arn:aws:s3:::${local.resolved_data_lake_bucket_name}"
@@ -32,6 +35,7 @@ locals {
   lambda_function_role_arn          = var.lambda_execution_role_arn_override != "" ? var.lambda_execution_role_arn_override : try(aws_iam_role.lambda_execution[0].arn, null)
   step_functions_lambda_target_arn  = var.metadata_validator_lambda_arn_override != "" ? var.metadata_validator_lambda_arn_override : try(aws_lambda_function.metadata_validator[0].arn, null)
   step_functions_lambda_target_name = local.step_functions_lambda_target_arn != null ? local.step_functions_lambda_target_arn : local.lambda_function_name
+  step_function_monitor_target_arn  = var.step_function_state_machine_arn_override != "" ? var.step_function_state_machine_arn_override : try(aws_sfn_state_machine.orchestration[0].arn, null)
   step_functions_lambda_invoke_resources = local.step_functions_lambda_target_arn != null ? [
     local.step_functions_lambda_target_arn,
     "${local.step_functions_lambda_target_arn}:*",
@@ -71,7 +75,7 @@ locals {
         Type = "Pass"
         Result = {
           status  = "processing_placeholder"
-          message = "Future Stage 19D will replace this pass state with AWS ETL, storage, and warehouse orchestration steps."
+          message = "Future Stage 19E will replace this pass state with AWS ETL, storage, and warehouse orchestration steps."
         }
         ResultPath = "$.processing_result"
         Next       = "Success"
@@ -256,7 +260,7 @@ resource "aws_iam_role_policy" "step_functions_execution" {
 }
 
 resource "aws_cloudwatch_log_group" "orchestration" {
-  count = var.create_cloudwatch_log_group ? 1 : 0
+  count = local.monitoring_log_groups_enabled ? 1 : 0
 
   name              = local.orchestration_log_group
   retention_in_days = var.cloudwatch_log_retention_days
@@ -266,6 +270,21 @@ resource "aws_cloudwatch_log_group" "orchestration" {
     {
       name    = local.orchestration_log_group
       purpose = "future-step-functions-logs"
+    }
+  )
+}
+
+resource "aws_cloudwatch_log_group" "lambda_metadata_validator" {
+  count = local.monitoring_log_groups_enabled ? 1 : 0
+
+  name              = local.lambda_log_group_name
+  retention_in_days = var.cloudwatch_log_retention_days
+
+  tags = merge(
+    local.common_tags,
+    {
+      name    = local.lambda_log_group_name
+      purpose = "metadata-validator-lambda-logs"
     }
   )
 }
@@ -344,4 +363,149 @@ resource "aws_sfn_state_machine" "orchestration" {
       error_message = "Enable IAM role creation or provide step_functions_role_arn before enabling the Step Functions foundation."
     }
   }
+}
+
+resource "aws_cloudwatch_metric_alarm" "lambda_errors" {
+  count = var.enable_cloudwatch_alarms ? 1 : 0
+
+  alarm_name          = "${local.lambda_function_name}-errors"
+  alarm_description   = "Alerts when the metadata-validator Lambda records one or more errors in the evaluation window."
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = var.cloudwatch_alarm_evaluation_periods
+  metric_name         = "Errors"
+  namespace           = "AWS/Lambda"
+  period              = var.cloudwatch_alarm_period_seconds
+  statistic           = "Sum"
+  threshold           = var.lambda_error_alarm_threshold
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = []
+  ok_actions          = []
+
+  dimensions = {
+    FunctionName = local.lambda_function_name
+  }
+
+  tags = merge(
+    local.common_tags,
+    {
+      name    = "${local.lambda_function_name}-errors"
+      purpose = "metadata-validator-error-alarm"
+    }
+  )
+}
+
+resource "aws_cloudwatch_metric_alarm" "lambda_duration" {
+  count = var.enable_cloudwatch_alarms ? 1 : 0
+
+  alarm_name          = "${local.lambda_function_name}-duration-risk"
+  alarm_description   = "Alerts when the metadata-validator Lambda duration approaches timeout risk."
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = var.cloudwatch_alarm_evaluation_periods
+  metric_name         = "Duration"
+  namespace           = "AWS/Lambda"
+  period              = var.cloudwatch_alarm_period_seconds
+  statistic           = "Maximum"
+  threshold           = var.lambda_duration_alarm_threshold_ms
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = []
+  ok_actions          = []
+
+  dimensions = {
+    FunctionName = local.lambda_function_name
+  }
+
+  tags = merge(
+    local.common_tags,
+    {
+      name    = "${local.lambda_function_name}-duration-risk"
+      purpose = "metadata-validator-duration-alarm"
+    }
+  )
+}
+
+resource "aws_cloudwatch_metric_alarm" "step_functions_failed" {
+  count = var.enable_cloudwatch_alarms && local.step_function_monitor_target_arn != null ? 1 : 0
+
+  alarm_name          = "${local.step_function_name}-executions-failed"
+  alarm_description   = "Alerts when the Step Functions orchestration records one or more failed executions."
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = var.cloudwatch_alarm_evaluation_periods
+  metric_name         = "ExecutionsFailed"
+  namespace           = "AWS/States"
+  period              = var.cloudwatch_alarm_period_seconds
+  statistic           = "Sum"
+  threshold           = var.step_functions_failed_executions_threshold
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = []
+  ok_actions          = []
+
+  dimensions = {
+    StateMachineArn = local.step_function_monitor_target_arn
+  }
+
+  tags = merge(
+    local.common_tags,
+    {
+      name    = "${local.step_function_name}-executions-failed"
+      purpose = "step-functions-failed-alarm"
+    }
+  )
+}
+
+resource "aws_cloudwatch_metric_alarm" "step_functions_timed_out" {
+  count = var.enable_cloudwatch_alarms && local.step_function_monitor_target_arn != null ? 1 : 0
+
+  alarm_name          = "${local.step_function_name}-executions-timed-out"
+  alarm_description   = "Alerts when the Step Functions orchestration records one or more timed-out executions."
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = var.cloudwatch_alarm_evaluation_periods
+  metric_name         = "ExecutionsTimedOut"
+  namespace           = "AWS/States"
+  period              = var.cloudwatch_alarm_period_seconds
+  statistic           = "Sum"
+  threshold           = var.step_functions_timed_out_executions_threshold
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = []
+  ok_actions          = []
+
+  dimensions = {
+    StateMachineArn = local.step_function_monitor_target_arn
+  }
+
+  tags = merge(
+    local.common_tags,
+    {
+      name    = "${local.step_function_name}-executions-timed-out"
+      purpose = "step-functions-timeout-alarm"
+    }
+  )
+}
+
+resource "aws_cloudwatch_metric_alarm" "validation_failure_placeholder" {
+  count = var.enable_cloudwatch_alarms && var.enable_validation_failure_alarm_placeholder ? 1 : 0
+
+  alarm_name          = "${local.step_function_name}-validation-failure-placeholder"
+  alarm_description   = "Placeholder alarm for a future custom validation-failure metric emitted by the orchestration layer."
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = var.cloudwatch_alarm_evaluation_periods
+  metric_name         = local.validation_failure_metric_name
+  namespace           = local.validation_failure_metric_namespace
+  period              = var.cloudwatch_alarm_period_seconds
+  statistic           = "Sum"
+  threshold           = var.validation_failure_alarm_threshold
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = []
+  ok_actions          = []
+
+  dimensions = {
+    Workflow = local.step_function_name
+  }
+
+  tags = merge(
+    local.common_tags,
+    {
+      name    = "${local.step_function_name}-validation-failure-placeholder"
+      purpose = "validation-failure-placeholder-alarm"
+    }
+  )
 }

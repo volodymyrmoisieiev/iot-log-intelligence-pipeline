@@ -1,6 +1,6 @@
 # AWS Orchestration Foundation
 
-This Terraform root module now covers Stage 19A, Stage 19B, and Stage 19C of the AWS orchestration foundation for the IoT Log Intelligence Pipeline. It remains intentionally separate from the existing Stage 12 S3 data lake root under `infra/terraform/aws/` so the repository can grow cloud orchestration structure without changing the current local runtime or rewriting the S3 foundation.
+This Terraform root module now covers Stage 19A, Stage 19B, Stage 19C, and Stage 19D of the AWS orchestration foundation for the IoT Log Intelligence Pipeline. It remains intentionally separate from the existing Stage 12 S3 data lake root under `infra/terraform/aws/` so the repository can grow cloud orchestration structure without changing the current local runtime or rewriting the S3 foundation.
 
 ## What this module includes
 
@@ -10,7 +10,8 @@ This Terraform root module now covers Stage 19A, Stage 19B, and Stage 19C of the
 - archive-based packaging for the local metadata-validator Lambda source
 - an optional metadata-validator Lambda foundation for file-key validation and layer detection
 - an optional Step Functions orchestration foundation that invokes the metadata-validator Lambda
-- optional shared CloudWatch log group foundation
+- optional CloudWatch monitoring foundations for Lambda and Step Functions log groups
+- optional CloudWatch alarms for Lambda errors, duration risk, Step Functions failures, and timeout risk
 - a readable Terraform-native state machine definition for validate -> decide -> process placeholder -> success/failure
 - safe outputs that expose naming, tags, data lake references, and placeholder definitions
 
@@ -21,6 +22,8 @@ All creation toggles default to `false`:
 - `create_iam_roles`
 - `enable_lambda_foundation`
 - `enable_step_functions_foundation`
+- `enable_cloudwatch_monitoring`
+- `enable_cloudwatch_alarms`
 - `create_cloudwatch_log_group`
 - `enable_step_function_logging`
 
@@ -77,6 +80,30 @@ IAM for this state machine stays least-privilege:
 - it does not need broad S3 permissions in Stage 19C
 - logging remains optional and behind the existing CloudWatch toggle
 
+## CloudWatch monitoring foundation
+
+Stage 19D adds the first monitoring and alarm layer for the cloud orchestration stack.
+
+What gets monitored:
+
+- metadata-validator Lambda errors
+- metadata-validator Lambda duration risk
+- Step Functions failed executions
+- Step Functions timed-out executions
+- an optional placeholder alarm for a future custom validation-failure metric
+
+Why CloudWatch matters here:
+
+- it gives the AWS orchestration layer a production-like observability baseline
+- it helps surface operational risk early, especially validation failures and timeout pressure
+- it prepares the project for future SNS, incident-routing, or dashboard integration without requiring that now
+
+Why alarms stay disabled by default:
+
+- Stage 19D is still a foundation-only phase
+- no AWS deploy is required for local validation
+- alarms and log groups should be created only when a future stage intentionally enables them
+
 ## Recommended relation to Stage 12
 
 Use this root module alongside the existing Stage 12 S3 module:
@@ -104,4 +131,5 @@ Later stages can extend this foundation with:
 - CloudWatch alarms and metrics for orchestration failures and Lambda invocation visibility
 - richer event contracts for S3-triggered validation and orchestration handoff
 - replacement of the processing placeholder with concrete AWS ETL and load steps
+- SNS or incident-routing integrations for CloudWatch alarms
 - cross-module wiring to the Stage 12 S3 foundation and future warehouse targets
