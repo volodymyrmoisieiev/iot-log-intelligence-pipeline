@@ -118,3 +118,6 @@ docs/performance/benchmark-summary-local.md
 docs/performance/performance-analysis-local.md
 docs/performance/results/*.json
 !docs/performance/results/.gitkeep
+
+# Data contract validator artifacts
+docs/data-contract-validation-local.json

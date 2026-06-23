@@ -8,6 +8,7 @@ This Airflow setup is intentionally local-development only:
 - it keeps the Stage 7A smoke DAG for quick Airflow health checks
 - it keeps the manual orchestration DAG for the existing local Kafka, PostgreSQL, producer, consumer, warehouse-loader, dbt, and Spark steps
 - it adds Kafka reset and warehouse truncate steps for safer repeatable demo runs
+- it validates the selected raw input CSV against the Stage 17 data contract before producer execution
 - it generates unique Kafka consumer and loader group ids per Airflow run
 - it runs Spark through the existing local `spark-batch` Docker Compose service in local Docker mode only
 - it uploads Spark device features to local MinIO and validates uploaded objects through the existing local object-storage services
@@ -147,6 +148,7 @@ Purpose:
 - run the local Kafka -> consumer -> warehouse -> dbt -> Spark flow from the Airflow UI
 - make demo reruns more consistent
 - keep orchestration logic in Airflow without rewriting the producer, consumer, warehouse-loader, dbt, or Spark services
+- stop the pipeline early if the selected raw CSV breaks the expected contract
 
 Dataset-mode defaults in this DAG:
 
@@ -166,6 +168,7 @@ Task order:
 - `reset_local_pipeline_state`
 - `start_infrastructure`
 - `truncate_warehouse_tables`
+- `validate_raw_data_contract`
 - `run_go_producer`
 - `run_python_consumer`
 - `run_warehouse_loader`
@@ -185,6 +188,7 @@ What each orchestration task does:
 - `reset_local_pipeline_state` stops and removes only Kafka runtime containers so the next run starts with fresh local Kafka state
 - `start_infrastructure` starts Kafka, Kafka UI, topic initialization, and the warehouse PostgreSQL service
 - `truncate_warehouse_tables` clears only `processed_iot_logs` and `invalid_iot_logs` with `RESTART IDENTITY`
+- `validate_raw_data_contract` runs `scripts/validate_data_contract.py` inside the Airflow container before producer execution and fails the DAG immediately if the selected CSV does not satisfy `contracts/iot_raw_log_contract.yml`
 - `run_go_producer` runs the existing Go producer with zero send delay
 - `run_go_producer` also passes `DATASET_PROFILE`, `PRODUCER_MAX_ROWS`, and `PRODUCER_SEND_DELAY_MS`
 - `run_python_consumer` processes a bounded batch of local Kafka messages with a unique consumer group id per DAG run and passes `CONSUMER_MAX_MESSAGES` plus `CONSUMER_PROGRESS_INTERVAL`
@@ -203,6 +207,14 @@ The Streamlit dashboard is intentionally not started by this DAG.
 Airflow metadata tables are intentionally not truncated or reset by this DAG.
 Spark output remains local Parquet output that is uploaded into local MinIO only; it is not loaded into PostgreSQL by Airflow and it is not sent to production AWS S3.
 Kafka alert messages remain append-only, so repeated DAG runs create separate observability run ids and may append additional topic messages.
+
+Raw-contract input path mapping inside Airflow uses `/opt/project`:
+
+- `sample` -> `/opt/project/data/samples/sample_iot_logs.csv`
+- `medium` -> `/opt/project/data/processed/medium_iot_logs.csv`
+- `full` -> `/opt/project/data/raw/full_iot_logs.csv`
+
+The validator writes a local summary file to `docs/data-contract-validation-local.json`. That artifact is git-ignored and can be regenerated safely during local Airflow runs.
 
 ## What repeatable runs reset
 
@@ -243,6 +255,7 @@ Both DAGs are paused by default and have no schedule, so they are safe for local
 
 Expected successful local result:
 
+- `validate_raw_data_contract` succeeds before the producer starts
 - Go producer sends `72` records
 - Python consumer processes `72` records
 - warehouse-loader inserts `72` processed records
@@ -379,6 +392,16 @@ docker compose up -d airflow-postgres airflow-init airflow-webserver airflow-sch
 - `reset_local_pipeline_state` is designed to stop and remove Kafka runtime containers before the next run
 - if a run was interrupted mid-flight, trigger the DAG again so the reset step executes cleanly
 
+### Raw data contract validation task fails
+
+- confirm the selected dataset file exists for the active `DATASET_PROFILE`
+- sample path: `/opt/project/data/samples/sample_iot_logs.csv`
+- medium path: `/opt/project/data/processed/medium_iot_logs.csv`
+- full path: `/opt/project/data/raw/full_iot_logs.csv`
+- run `docker compose run --rm airflow-webserver airflow tasks test iot_local_pipeline_dag validate_raw_data_contract 2024-01-01`
+- inspect the local summary artifact at `docs/data-contract-validation-local.json`
+- rerun the validator directly with `.\.venv-observability\Scripts\python.exe .\scripts\validate_data_contract.py --input .\data\samples\sample_iot_logs.csv --summary-json docs/data-contract-validation-local.json`
+
 ### Spark validation task fails
 
 - confirm `run_spark_device_features` succeeded earlier in the same DAG run
@@ -435,6 +458,7 @@ docker compose exec airflow-webserver airflow dags list
 docker compose exec airflow-webserver airflow dags show iot_local_pipeline_dag
 docker compose run --rm airflow-webserver python -m py_compile /opt/airflow/dags/iot_local_pipeline_dag.py
 docker compose run --rm airflow-webserver airflow tasks list iot_local_pipeline_dag
+docker compose run --rm airflow-webserver airflow tasks test iot_local_pipeline_dag validate_raw_data_contract 2024-01-01
 docker compose run --build --rm observability-writer --run-id airflow-readme-validation --publish-alerts
 ```
 
@@ -444,6 +468,7 @@ Manual UI verification:
 - log in with `airflow / airflow`
 - confirm both DAGs are visible
 - trigger `iot_local_pipeline_dag`
+- confirm `validate_raw_data_contract` succeeds before `run_go_producer`
 - confirm every task reaches `success`
 - confirm `run_dbt_test` reports `53` passing tests
 - confirm `run_spark_device_features` succeeds
