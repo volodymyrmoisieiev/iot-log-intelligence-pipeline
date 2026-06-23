@@ -1,5 +1,7 @@
 # AWS Cloud Orchestration Foundation
 
+For the final Stage 19 runbook, validation flow, and PR-ready summary, see [docs/stage-19-aws-cloud-orchestration.md](stage-19-aws-cloud-orchestration.md).
+
 ## Stage 19 purpose
 
 Stage 19 introduces the cloud orchestration layer for the IoT Log Intelligence Pipeline. The goal is not to migrate the current local stack to AWS immediately. Instead, the goal is to prepare a clean, portfolio-ready Terraform and architecture foundation for the control-plane pieces that typically coordinate a modern data platform on AWS.
@@ -163,17 +165,11 @@ Stage 19D extends that control-plane foundation with:
 
 This stage still does not require or perform a real AWS deployment.
 
-## Planned Stage 19E scope
+## What Stage 19E finalizes
 
-### Stage 19E
+Stage 19E finalizes the Stage 19 documentation, validation guidance, and PR-ready cleanup for the AWS orchestration foundation.
 
-Stage 19E can focus on safer cross-module integration and deployment readiness:
-
-- wiring orchestration inputs to the Stage 12 S3 outputs
-- replacing the processing placeholder with concrete ETL, storage, or warehouse steps
-- connecting CloudWatch alarms to SNS, incident-routing, or richer dashboards
-- environment-specific tfvars examples
-- CI validation expansion for the orchestration root module
+For the final Stage 19 runbook and future-improvements summary, see [docs/stage-19-aws-cloud-orchestration.md](stage-19-aws-cloud-orchestration.md).
 
 ## Cost-safety notes
 

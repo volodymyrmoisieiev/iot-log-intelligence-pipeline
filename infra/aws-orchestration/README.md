@@ -1,5 +1,7 @@
 # AWS Orchestration Foundation
 
+For the final Stage 19 runbook and PR-ready summary, see [docs/stage-19-aws-cloud-orchestration.md](../../docs/stage-19-aws-cloud-orchestration.md).
+
 This Terraform root module now covers Stage 19A, Stage 19B, Stage 19C, and Stage 19D of the AWS orchestration foundation for the IoT Log Intelligence Pipeline. It remains intentionally separate from the existing Stage 12 S3 data lake root under `infra/terraform/aws/` so the repository can grow cloud orchestration structure without changing the current local runtime or rewriting the S3 foundation.
 
 ## What this module includes
@@ -117,6 +119,14 @@ When future stages are ready, wire `existing_data_lake_bucket_name` and `existin
 
 ```powershell
 .\.venv-observability\Scripts\python.exe -m py_compile .\aws\lambda\iot_metadata_validator\handler.py
+terraform -chdir=infra/aws-orchestration fmt
+terraform -chdir=infra/aws-orchestration init -backend=false
+terraform -chdir=infra/aws-orchestration validate
+```
+
+Required Terraform validation flow:
+
+```powershell
 terraform -chdir=infra/aws-orchestration fmt
 terraform -chdir=infra/aws-orchestration init -backend=false
 terraform -chdir=infra/aws-orchestration validate
