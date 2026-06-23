@@ -114,5 +114,6 @@ secrets/
 coverage/
 
 # Performance benchmark artifacts
+docs/performance/benchmark-summary-local.md
 docs/performance/results/*.json
 !docs/performance/results/.gitkeep

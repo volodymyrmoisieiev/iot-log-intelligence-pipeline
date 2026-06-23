@@ -12,6 +12,7 @@ The current benchmark scope is intentionally narrow:
 - Python consumer timing
 - warehouse loader timing
 - JSON result capture for local comparison
+- optional Markdown summary generation for human-readable reporting
 
 The helper script lives at `scripts/run_performance_benchmark.py`.
 
@@ -39,6 +40,14 @@ Use `--dry-run` when you want to confirm commands and output paths without execu
 ```powershell
 python .\scripts\run_performance_benchmark.py --dry-run --profile sample --rows 72
 ```
+
+Generate a local Markdown summary alongside the JSON result:
+
+```powershell
+.\.venv-observability\Scripts\python.exe .\scripts\run_performance_benchmark.py --profile sample --rows 72 --summary-md docs/performance/benchmark-summary-local.md
+```
+
+That `benchmark-summary-local.md` file is a local artifact unless you intentionally decide to commit a specific result for portfolio evidence.
 
 ## Generate a Medium Dataset
 
@@ -80,6 +89,23 @@ Each report captures:
 - total elapsed seconds
 - return codes
 
+When `--summary-md` is provided, the script also writes a human-readable Markdown summary that includes:
+
+- benchmark timestamp
+- dataset profile
+- rows and message caps
+- elapsed time per step
+- total elapsed time
+- return codes
+- a short interpretation section
+- a note that the numbers depend on the local machine and Docker resources
+
 These result files are local artifacts and should stay out of normal commits unless you intentionally choose one as portfolio evidence.
 
-Git is configured to ignore the generated JSON files while still allowing the folder structure to remain in the repository.
+Use the result files this way:
+
+- JSON result file: machine-readable benchmark artifact stored under `docs/performance/results/`
+- Markdown summary file: optional human-readable local summary such as `docs/performance/benchmark-summary-local.md`
+- committed example summary: [docs/performance/benchmark-summary-example.md](benchmark-summary-example.md), which shows how to read the generated output without committing local run artifacts
+
+Git is configured to ignore generated JSON benchmark results and the local `benchmark-summary-local.md` file while still allowing the folder structure and the committed example summary to remain in the repository.

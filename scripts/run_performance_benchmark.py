@@ -74,6 +74,14 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Print commands and write a report without executing Docker Compose.",
     )
+    parser.add_argument(
+        "--summary-md",
+        default=None,
+        help=(
+            "Optional Markdown file or directory for a human-readable benchmark "
+            "summary. Default: disabled."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -100,6 +108,23 @@ def resolve_output_path(output_value: str | None, profile: str, rows: int) -> Pa
         return output_path
 
     return output_path / f"benchmark_{profile}_{rows}_rows_{timestamp_token}.json"
+
+
+def resolve_summary_path(
+    summary_value: str | None, profile: str, rows: int
+) -> Path | None:
+    if not summary_value:
+        return None
+
+    summary_path = Path(summary_value)
+    if not summary_path.is_absolute():
+        summary_path = (REPO_ROOT / summary_value).resolve()
+
+    if summary_path.suffix.lower() == ".md":
+        return summary_path
+
+    timestamp_token = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return summary_path / f"benchmark_{profile}_{rows}_rows_{timestamp_token}.md"
 
 
 def dataset_path_for_profile(profile: str) -> Path:
@@ -186,7 +211,7 @@ def print_header(
     output_path: Path,
     dry_run: bool,
 ) -> None:
-    print("Stage 16A performance benchmark")
+    print("Stage 16 performance benchmark")
     print(f"Repository root: {REPO_ROOT}")
     print(f"Profile: {profile}")
     print(f"Producer row cap: {rows}")
@@ -200,6 +225,87 @@ def print_header(
 def write_report(output_path: Path, report: dict[str, Any]) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+
+
+def format_return_code(return_code: Any) -> str:
+    if return_code is None:
+        return "not executed (dry-run)"
+    return str(return_code)
+
+
+def build_interpretation(report: dict[str, Any]) -> list[str]:
+    if report["dry_run"]:
+        return [
+            "This was a dry run, so the benchmark did not execute Docker Compose commands.",
+            "Elapsed times remain at 0 seconds and return codes are recorded as not executed.",
+        ]
+
+    failed_steps = [
+        step["name"] for step in report["commands"] if step["return_code"] not in (0, None)
+    ]
+    if failed_steps:
+        return [
+            "At least one benchmark step failed, so compare the return codes before treating these timings as meaningful.",
+            "Investigate the failed step first, then rerun the benchmark on the same profile and message caps.",
+        ]
+
+    return [
+        "These timings show how long the local Docker-based producer, consumer, and loader steps took for this dataset profile.",
+        "Use repeated runs on the same machine and Docker resource settings for fair comparisons between sample, medium, and full profiles.",
+    ]
+
+
+def build_markdown_summary(report: dict[str, Any]) -> str:
+    rows = [
+        "| Step | Command | Elapsed seconds | Return code |",
+        "| --- | --- | ---: | --- |",
+    ]
+    for step in report["commands"]:
+        rows.append(
+            "| "
+            f"{step['name']} | "
+            f"`{subprocess.list2cmdline(step['command'])}` | "
+            f"{step['elapsed_seconds']:.3f} | "
+            f"{format_return_code(step['return_code'])} |"
+        )
+
+    interpretation_lines = "\n".join(
+        f"- {line}" for line in build_interpretation(report)
+    )
+
+    return "\n".join(
+        [
+            "# Benchmark Summary",
+            "",
+            f"- Benchmark timestamp: `{report['timestamp']}`",
+            f"- Dataset profile: `{report['profile']}`",
+            f"- Producer rows: `{report['rows']}`",
+            f"- Consumer messages: `{report['consumer_messages']}`",
+            f"- Warehouse loader messages: `{report['loader_messages']}`",
+            f"- Dry run: `{report['dry_run']}`",
+            "",
+            "## Step Results",
+            "",
+            *rows,
+            "",
+            f"**Total elapsed time:** `{report['total_elapsed_seconds']:.3f}` seconds",
+            "",
+            "## Interpretation",
+            "",
+            interpretation_lines,
+            "",
+            "## Note",
+            "",
+            "- Results depend on the local machine, active Docker resource limits, and any other workload running at the same time.",
+            "- Treat these numbers as environment-specific local measurements rather than portable absolute performance claims.",
+            "",
+        ]
+    )
+
+
+def write_markdown_summary(summary_path: Path, report: dict[str, Any]) -> None:
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text(build_markdown_summary(report), encoding="utf-8")
 
 
 def run_step(
@@ -237,6 +343,7 @@ def main() -> int:
         )
         validate_profile_input(args.profile)
         output_path = resolve_output_path(args.output, args.profile, rows)
+        summary_path = resolve_summary_path(args.summary_md, args.profile, rows)
         steps = build_steps()
         benchmark_env = build_benchmark_env(
             args.profile,
@@ -303,12 +410,16 @@ def main() -> int:
             "total_elapsed_seconds": round(total_elapsed, 6),
         }
         write_report(output_path, report)
+        if summary_path is not None:
+            write_markdown_summary(summary_path, report)
 
         print()
         print("Benchmark summary")
         print(f"Steps recorded: {len(step_reports)}")
         print(f"Total elapsed seconds: {total_elapsed:.3f}")
         print(f"JSON report written to: {output_path}")
+        if summary_path is not None:
+            print(f"Markdown summary written to: {summary_path}")
         return 0
     except BenchmarkError as exc:
         print(f"Benchmark error: {exc}", file=sys.stderr)
