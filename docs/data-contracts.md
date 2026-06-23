@@ -148,3 +148,13 @@ Airflow uses these `/opt/project` path mappings for dataset profiles:
 The Airflow validation task also writes a local summary file to `docs/data-contract-validation-local.json`. That artifact remains git-ignored so it can be regenerated during local orchestration runs without polluting commits.
 
 This Stage 17C integration turns the contract into a practical pipeline guardrail instead of a documentation-only or CLI-only step.
+
+## Stage 17 Workflow
+
+Stage 17 now works as one connected validation flow:
+
+1. `contracts/iot_raw_log_contract.yml` defines the expected raw CSV schema.
+2. `scripts/validate_data_contract.py` validates local CSV files against that contract.
+3. Airflow runs `validate_raw_data_contract` before `run_go_producer`, so invalid raw input stops the pipeline early.
+
+For the PR-ready Stage 17 summary, workflow explanation, and portfolio framing, see [docs/stage-17-data-contracts-validation.md](stage-17-data-contracts-validation.md).

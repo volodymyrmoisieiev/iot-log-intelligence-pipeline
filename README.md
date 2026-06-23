@@ -1069,7 +1069,7 @@ What this stage does not do:
 - it does not change Airflow DAG logic
 - it does not change dbt, Spark, MinIO, or Terraform behavior
 
-## 37. Stage 17A Data Contracts + Stronger Validation
+## 37. Stage 17 Data Contracts + Stronger Validation
 
 Stage 17A adds the first repository data contract for the raw IoT log CSV schema. Stage 17B adds local contract validation tooling through `scripts/validate_data_contract.py`. Stage 17C adds an Airflow pre-check that validates raw input data before producer execution. These stages do not change producer runtime logic, consumer runtime logic, warehouse-loader runtime logic, dbt models, Spark jobs, MinIO logic, Terraform logic, or benchmark scripts.
 
@@ -1077,6 +1077,7 @@ What this stage provides:
 
 - a raw IoT log contract at [contracts/iot_raw_log_contract.yml](contracts/iot_raw_log_contract.yml)
 - a focused data contract guide at [docs/data-contracts.md](docs/data-contracts.md)
+- a Stage 17 runbook at [docs/stage-17-data-contracts-validation.md](docs/stage-17-data-contracts-validation.md)
 - a local CSV validator at `scripts/validate_data_contract.py`
 - an Airflow pre-check task that fails early on raw-data contract violations
 

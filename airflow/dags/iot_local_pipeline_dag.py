@@ -349,7 +349,7 @@ with DAG(
         task_id="validate_observability_output",
         bash_command=compose_command(
             dedent(
-                f"""
+                rf"""
                 exec -T postgres bash -lc '
                 observability_run_id="{OBSERVABILITY_RUN_ID}"
                 audit_count=$(PGPASSWORD="$POSTGRES_PASSWORD" psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -t -A -v ON_ERROR_STOP=1 -c "SELECT COUNT(*) FROM pipeline_run_audit WHERE run_id = \$run_id\$$observability_run_id\$run_id\$;")
