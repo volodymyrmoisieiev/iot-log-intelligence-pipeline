@@ -2,7 +2,7 @@
 
 ## What Stage 20 adds
 
-Stage 20 starts the repository's GitHub Actions quality-gate path. Stage 20A introduces a safe, fast CI foundation that runs on pull requests targeting `develop` and `main`, plus direct pushes to those branches. Stage 20B adds a separate Terraform validation workflow for the AWS orchestration foundation under `infra/aws-orchestration/`. Stage 20C adds a dedicated Python and Airflow validation workflow for lightweight syntax and DAG checks.
+Stage 20 starts the repository's GitHub Actions quality-gate path. Stage 20A introduces a safe, fast CI foundation that runs on pull requests targeting `develop` and `main`, plus direct pushes to those branches. Stage 20B adds a separate Terraform validation workflow for the AWS orchestration foundation under `infra/aws-orchestration/`. Stage 20C adds a dedicated Python and Airflow validation workflow for lightweight syntax and DAG checks. Stage 20D adds pull request and release-process guidance plus visible CI quality indicators in the README.
 
 This stage is intentionally conservative. It gives the project a repeatable automated checkpoint for structural problems and obvious syntax regressions without trying to run the full local platform inside GitHub-hosted runners.
 
@@ -147,11 +147,51 @@ To keep this workflow safe and fast, Stage 20C does not:
 
 For now, Airflow validation in CI is intentionally limited to DAG Python syntax checks and DAG-file discovery. Full Airflow CLI or runtime validation remains better suited to local manual verification through the existing Docker Compose Airflow setup.
 
+## What Stage 20D adds
+
+Stage 20D adds process and presentation improvements around the existing quality gates:
+
+- a GitHub pull request template at `.github/pull_request_template.md`
+- a release and branch-cleanup checklist at `docs/release-checklist.md`
+- README CI badges for:
+  - `CI`
+  - `Terraform Validate`
+  - `Python and Airflow Validate`
+
+## Why Stage 20D improves the engineering workflow
+
+Stage 20D does not add new runtime validation logic. Instead, it makes the current CI system easier to use and easier to understand:
+
+- contributors get a structured PR checklist before merge
+- release flow expectations are documented in one place
+- reviewers can see workflow health directly from the README
+- the repository looks more polished and portfolio-ready
+
+This is especially useful for a project that now has multiple separate quality gates rather than one large catch-all workflow.
+
+## What Stage 20D intentionally does not change
+
+Stage 20D does not:
+
+- change Docker Compose runtime logic
+- change Airflow DAG logic
+- change producer, consumer, dbt, Spark, MinIO, or Terraform resource behavior
+- add deployment automation
+- change GitHub Actions execution logic beyond presentation and process documentation
+
+## What comes next in Stage 20E
+
+Stage 20E is planned to build on the process foundation from 20D with deeper release-readiness and validation coverage, such as:
+
+- broader language-level test automation
+- richer dbt or orchestration validation where cost-safe
+- stricter smoke-check guidance for higher-confidence merge readiness
+- more explicit release guardrails as the repository moves closer to a fuller CI/CD story
+
 ## Planned Stage 20 expansion
 
 The Stage 20 roadmap is intentionally incremental:
 
-- Stage 20D: add targeted language-level tests plus deeper dbt and orchestration validation in modular workflows
-- Stage 20E: add stricter container smoke checks and release-oriented safeguards for deployment readiness and branch protection support
+- Stage 20E: add deeper release-readiness, testing, and higher-confidence validation guardrails on top of the current quality-gate foundation
 
 Each follow-up stage should stay explicit about runtime cost, credential requirements, and what is safe to execute on GitHub-hosted runners.
