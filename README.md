@@ -15,7 +15,7 @@
 
 IoT Log Intelligence Pipeline is a portfolio project focused on end-to-end data engineering for IoT logs: ingestion, processing, storage, transformation, and analytics.
 
-The repository is currently at Stage 20E, with a working local Kafka stack, a Go producer, a Python consumer validation layer, a local PostgreSQL warehouse foundation, a warehouse loader service, dbt staging models, dbt analytics marts on top of PostgreSQL, an optional Snowflake-ready dbt target for future cloud warehouse integration, a polished Streamlit dashboard for local analytics, a Streamlit observability monitoring section, safer repeatable local Apache Airflow orchestration for the existing pipeline steps, a fast Stage 20A GitHub Actions CI foundation for repository structure, Docker Compose validation, and lightweight Python syntax checks on pull requests and pushes to `develop` and `main`, a dedicated Stage 20B Terraform validation GitHub Actions workflow for the AWS orchestration foundation under `infra/aws-orchestration/`, a dedicated Stage 20C Python and Airflow validation GitHub Actions workflow for lightweight script compilation and DAG syntax checks, Stage 20D pull-request and release-process guidance with visible README CI quality badges, and a final Stage 20E CI quality-gates runbook with PR-ready cleanup guidance, alongside a local PySpark batch-processing foundation with a device-level feature engineering job that runs inside the local Airflow pipeline, a local MinIO-based S3-compatible object storage foundation, a local uploader that sends Spark device-feature Parquet output into MinIO, Airflow integration that uploads and validates those MinIO objects as part of the local DAG, an AWS-ready Terraform foundation, Terraform S3 data lake definitions for future AWS storage, an AWS cloud orchestration Terraform foundation for future Lambda, Step Functions, CloudWatch, IAM, and S3-integrated control-plane work, a local AWS Lambda metadata-validation foundation for cloud-side file intake, a Step Functions orchestration foundation for validation-first AWS workflow design, a CloudWatch monitoring and alarms foundation for orchestration observability, and a final Stage 19 AWS orchestration runbook for PR-ready cloud-foundation documentation, alongside the existing observability schema foundation for pipeline audit history, quality checks, and alerts, a local observability writer that persists warehouse-derived metrics into those audit tables, can optionally publish alert events to Kafka, runs near the end of the local Airflow DAG, dataset profile support that now extends through producer, consumer, loader, and the local Airflow runbook for `sample`, `medium`, and `full` style validation runs, a local performance benchmark foundation for benchmark execution, Markdown summary generation, and bottleneck-focused analysis, a Stage 17 data contract foundation, local CSV validation tooling, an Airflow pre-check for the raw IoT log schema, and a Stage 18 anomaly detection foundation with a standalone script, warehouse persistence, Airflow integration, and final PR-ready documentation.
+The repository is currently at Stage 21A, with a working local Kafka stack, a Go producer, a Python consumer validation layer, a local PostgreSQL warehouse foundation, a warehouse loader service, dbt staging models, dbt analytics marts on top of PostgreSQL, an optional Snowflake-ready dbt target for future cloud warehouse integration, a polished Streamlit dashboard for local analytics, a Streamlit observability monitoring section, safer repeatable local Apache Airflow orchestration for the existing pipeline steps, a fast Stage 20A GitHub Actions CI foundation for repository structure, Docker Compose validation, and lightweight Python syntax checks on pull requests and pushes to `develop` and `main`, a dedicated Stage 20B Terraform validation GitHub Actions workflow for the AWS orchestration foundation under `infra/aws-orchestration/`, a dedicated Stage 20C Python and Airflow validation GitHub Actions workflow for lightweight script compilation and DAG syntax checks, Stage 20D pull-request and release-process guidance with visible README CI quality badges, a final Stage 20E CI quality-gates runbook with PR-ready cleanup guidance, and a Stage 21A local E2E smoke-test foundation that reuses those safe checks through one bounded JSON-reporting entry point without starting the full local pipeline by default, alongside a local PySpark batch-processing foundation with a device-level feature engineering job that runs inside the local Airflow pipeline, a local MinIO-based S3-compatible object storage foundation, a local uploader that sends Spark device-feature Parquet output into MinIO, Airflow integration that uploads and validates those MinIO objects as part of the local DAG, an AWS-ready Terraform foundation, Terraform S3 data lake definitions for future AWS storage, an AWS cloud orchestration Terraform foundation for future Lambda, Step Functions, CloudWatch, IAM, and S3-integrated control-plane work, a local AWS Lambda metadata-validation foundation for cloud-side file intake, a Step Functions orchestration foundation for validation-first AWS workflow design, a CloudWatch monitoring and alarms foundation for orchestration observability, and a final Stage 19 AWS orchestration runbook for PR-ready cloud-foundation documentation, alongside the existing observability schema foundation for pipeline audit history, quality checks, and alerts, a local observability writer that persists warehouse-derived metrics into those audit tables, can optionally publish alert events to Kafka, runs near the end of the local Airflow DAG, dataset profile support that now extends through producer, consumer, loader, and the local Airflow runbook for `sample`, `medium`, and `full` style validation runs, a local performance benchmark foundation for benchmark execution, Markdown summary generation, and bottleneck-focused analysis, a Stage 17 data contract foundation, local CSV validation tooling, an Airflow pre-check for the raw IoT log schema, and a Stage 18 anomaly detection foundation with a standalone script, warehouse persistence, Airflow integration, and final PR-ready documentation.
 
 ## 2. Planned local architecture
 
@@ -153,6 +153,7 @@ iot-log-intelligence-pipeline/
 - Stage 20C: Python and Airflow validation workflow
 - Stage 20D: PR template, release checklist, and README CI badges
 - Stage 20E: final CI quality-gates runbook and PR-ready cleanup
+- Stage 21A: local E2E smoke test foundation
 
 ## 7. Stage 1 local setup
 
@@ -684,6 +685,35 @@ Stage 20E adds the final Stage 20 runbook at [docs/stage-20-ci-quality-gates.md]
 
 For the focused Stage 20 guide and expansion roadmap, see [docs/ci-quality-gates.md](docs/ci-quality-gates.md).
 
+## 21. Stage 21D Local E2E smoke test foundation and controlled profile runtimes
+
+Stage 21D keeps the safe local smoke-test entry point at `scripts/run_local_e2e_smoke_test.py`, preserves `--run-profile-pipeline` plus the backward-compatible `--run-sample-pipeline` alias, adds controlled full-profile runtime validation behind `--allow-full-run`, and updates the focused runbook at [docs/local-e2e-smoke-test.md](docs/local-e2e-smoke-test.md).
+
+For the final Stage 21 runbook, validated full-run example, cleanup guidance, and follow-up ideas, see [docs/stage-21-local-e2e-validation.md](docs/stage-21-local-e2e-validation.md).
+
+What this stage provides:
+
+- a standard-library-only smoke-test helper with `sample`, `medium`, and `full` profile selection
+- bounded row inspection through `--max-rows` so repository validation does not scan the full dataset by default
+- dataset preflight reporting for resolved path, existence, and available row count
+- stronger full-profile preflight that fails clearly when the full dataset is missing or smaller than the requested bounded row count
+- JSON result reporting for repository structure, dataset selection, Docker Compose config, Python syntax, Terraform validation, data-contract validation, and optional read-only anomaly detection
+- stage-duration reporting for data contract validation, producer, consumer, warehouse loader, PostgreSQL verification, and anomaly detection
+- an optional controlled sample, medium, or full runtime E2E pass that starts required local services, runs producer/consumer/warehouse-loader with matching bounded limits, and verifies PostgreSQL row-count deltas
+- explicit safety rails that avoid starting the full Kafka/PostgreSQL pipeline, avoid AWS deployment, and avoid `terraform apply`
+
+Recommended sample-safe commands:
+
+```powershell
+.\.venv-observability\Scripts\python.exe .\scripts\run_local_e2e_smoke_test.py --profile sample --max-rows 1000 --dry-run --output-json docs/e2e-smoke-test-local.json
+.\.venv-observability\Scripts\python.exe .\scripts\run_local_e2e_smoke_test.py --profile sample --max-rows 1000 --output-json docs/e2e-smoke-test-local.json
+.\.venv-observability\Scripts\python.exe .\scripts\run_local_e2e_smoke_test.py --profile sample --max-rows 1000 --run-profile-pipeline --output-json docs/e2e-smoke-test-local.json
+.\.venv-observability\Scripts\python.exe .\scripts\run_local_e2e_smoke_test.py --profile medium --max-rows 10000 --run-profile-pipeline --output-json docs/e2e-smoke-test-local.json
+.\.venv-observability\Scripts\python.exe .\scripts\run_local_e2e_smoke_test.py --profile full --max-rows 100000 --run-profile-pipeline --allow-full-run --output-json docs/e2e-smoke-test-local.json
+```
+
+Stage 21D still keeps the default flow sample-safe and bounded. Full dataset validation now exists, but it remains an explicit opt-in path rather than the default local behavior here.
+
 ## 22. Stage 9A PySpark batch processing foundation
 
 Stage 9A adds the local PySpark foundation for future batch processing work. This stage introduces a Dockerized local-mode Spark runtime and a smoke job. No existing producer, consumer, warehouse-loader, dbt, Streamlit, or Airflow logic is changed.
@@ -1174,13 +1204,17 @@ Do not commit real credentials, production secrets, or sensitive data. Use envir
 
 ## 41. Current stage
 
-Stage 20E includes everything from Stage 20D plus:
+Stage 21D includes everything from Stage 21C plus:
 
-- a final Stage 20 runbook at `docs/stage-20-ci-quality-gates.md`
-- cross-links between the README, CI quality-gates guide, and release checklist
-- PR-ready documentation cleanup for the current `feature/ci-quality-gates` branch
+- a local smoke-test helper at `scripts/run_local_e2e_smoke_test.py`
+- a focused local smoke-test runbook at `docs/local-e2e-smoke-test.md`
+- bounded JSON-reporting validation for repository structure, Docker Compose config, Python syntax, Terraform validation, data contracts, and optional read-only anomaly detection
+- dataset preflight reporting for resolved path, file existence, and available row counts
+- stronger full-profile preflight plus `--allow-full-run`
+- stage-duration reporting in the JSON summary for key runtime steps
+- an optional controlled sample, medium, or full runtime E2E mode with isolated Kafka topics, bounded producer/consumer/loader limits, and PostgreSQL row-count verification
 
-Stage 20D, Stage 20C, Stage 20B, Stage 20A, Stage 19E, Stage 19D, Stage 19C, Stage 19B, Stage 19A, and Stage 18D foundations remain in place, including:
+Stage 21C, Stage 21B, Stage 21A, Stage 20E, Stage 20D, Stage 20C, Stage 20B, Stage 20A, Stage 19E, Stage 19D, Stage 19C, Stage 19B, Stage 19A, and Stage 18D foundations remain in place, including:
 
 - repository skeleton and documentation
 - local Docker Compose services for Kafka, Kafka topic initialization, and Kafka UI
@@ -1233,5 +1267,9 @@ Stage 20D, Stage 20C, Stage 20B, Stage 20A, Stage 19E, Stage 19D, Stage 19C, Sta
 - an Airflow `run_anomaly_detection` task after `run_warehouse_loader`
 - a Stage 18 anomaly detection guide at `docs/anomaly-detection.md`
 - a final Stage 18 runbook at `docs/stage-18-anomaly-detection.md`
+- a local E2E smoke-test helper that ties together safe repository-level checks without running the full dataset or full local pipeline by default
+- an optional controlled sample runtime flow that exercises the producer, consumer, and warehouse loader with visible bounded limits
+- an optional controlled medium runtime flow that extends the same validation pattern to a prepared `10000`-row subset
+- an optional controlled full runtime flow that validates up to `100000` rows only when `--allow-full-run` is explicitly provided
 
-Airflow now orchestrates the existing local producer, consumer, warehouse loader, anomaly detection step, dbt flow, PySpark device feature engineering step, local Spark output validation, local MinIO upload, and MinIO object validation through one manual DAG that is safer for repeated demo runs and better documented for local development. Spark still runs only in local Docker mode, and MinIO remains a local S3-compatible target only rather than production AWS S3. Stage 12C keeps the Terraform S3 data lake definitions that mirror the local MinIO pattern for future AWS use and adds CI validation for them, but no AWS resources are created until `terraform apply` is run, and neither `terraform plan` nor `terraform apply` is part of CI. Full dbt execution and full Airflow orchestration are still verified locally through Docker Compose or Airflow, while CI remains limited to safe validation checks. Stage 15A adds the dataset profile contract, Stage 15B adds the local preparation script, Stage 15C brings those profiles into the Go producer, Stage 15D makes larger consumer and loader validation runs clearer and safer, Stage 15E carries those settings into the local Airflow DAG and runbook without changing downstream modeling logic, Stage 16A adds the first local benchmark helper for measuring those profile-specific runs, Stage 16B adds human-readable benchmark summary generation on top of the JSON benchmark artifacts, Stage 16C adds benchmark result analysis on top of those local outputs, Stage 16D finalizes the Performance / Load Testing workflow as PR-ready documentation, Stage 17A adds the first formal raw-data contract foundation for stronger future validation, Stage 17B adds local raw-CSV contract validation tooling on top of that foundation, Stage 17C makes that validation a real Airflow pipeline guardrail before producer execution, Stage 18A adds a local rule-based anomaly detection foundation, Stage 18B persists those anomaly results into the warehouse, Stage 18C integrates that anomaly detection into Airflow after warehouse loading, and Stage 18D finalizes the documentation and validation story for PR review.
+Airflow now orchestrates the existing local producer, consumer, warehouse loader, anomaly detection step, dbt flow, PySpark device feature engineering step, local Spark output validation, local MinIO upload, and MinIO object validation through one manual DAG that is safer for repeated demo runs and better documented for local development. Spark still runs only in local Docker mode, and MinIO remains a local S3-compatible target only rather than production AWS S3. Stage 12C keeps the Terraform S3 data lake definitions that mirror the local MinIO pattern for future AWS use and adds CI validation for them, but no AWS resources are created until `terraform apply` is run, and neither `terraform plan` nor `terraform apply` is part of CI. Full dbt execution and full Airflow orchestration are still verified locally through Docker Compose or Airflow, while CI remains limited to safe validation checks. Stage 15A adds the dataset profile contract, Stage 15B adds the local preparation script, Stage 15C brings those profiles into the Go producer, Stage 15D makes larger consumer and loader validation runs clearer and safer, Stage 15E carries those settings into the local Airflow DAG and runbook without changing downstream modeling logic, Stage 16A adds the first local benchmark helper for measuring those profile-specific runs, Stage 16B adds human-readable benchmark summary generation on top of the JSON benchmark artifacts, Stage 16C adds benchmark result analysis on top of those local outputs, Stage 16D finalizes the Performance / Load Testing workflow as PR-ready documentation, Stage 17A adds the first formal raw-data contract foundation for stronger future validation, Stage 17B adds local raw-CSV contract validation tooling on top of that foundation, Stage 17C makes that validation a real Airflow pipeline guardrail before producer execution, Stage 18A adds a local rule-based anomaly detection foundation, Stage 18B persists those anomaly results into the warehouse, Stage 18C integrates that anomaly detection into Airflow after warehouse loading, Stage 18D finalizes the documentation and validation story for PR review, Stage 21A adds a reusable local smoke-test foundation that prepares future fuller dataset validation without changing any existing pipeline runtime logic, Stage 21B extends that entry point with a controlled sample runtime E2E pass, Stage 21C expands it to a controlled medium-profile runtime E2E pass, and Stage 21D adds controlled full-profile validation up to `100000` rows behind explicit opt-in safeguards.

@@ -125,3 +125,7 @@ docs/data-contract-validation-local.json
 
 # Anomaly detection local artifacts
 docs/anomaly-detection-local.json
+
+# Local E2E smoke test artifacts
+docs/e2e-smoke-test-local.json
+docs/e2e-smoke-test-*.json
