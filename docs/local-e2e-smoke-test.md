@@ -82,7 +82,7 @@ What this mode adds:
 - creates isolated Kafka topics for the controlled runtime pass
 - runs the Go producer with `DATASET_PROFILE=sample`, `PRODUCER_MAX_ROWS`, `PRODUCER_PROGRESS_INTERVAL`, and `PRODUCER_SEND_DELAY_MS=0`
 - runs the Python consumer with matching `CONSUMER_MAX_MESSAGES` and `CONSUMER_PROGRESS_INTERVAL`
-- runs the warehouse loader with matching `WAREHOUSE_LOADER_MAX_MESSAGES` and `WAREHOUSE_LOADER_PROGRESS_INTERVAL`
+- runs the warehouse loader with matching `WAREHOUSE_LOADER_MAX_MESSAGES`, `WAREHOUSE_LOADER_PROGRESS_INTERVAL`, and `WAREHOUSE_LOADER_BATCH_SIZE`
 - captures PostgreSQL row counts before and after the run and verifies the row-count delta
 - reruns bounded data-contract validation
 - attempts anomaly detection in safe read-only mode and records either a result or an explicit `skip`
@@ -93,6 +93,7 @@ How progress is displayed in this mode:
 - the Python consumer and warehouse loader use `tqdm` only when it is installed and the process is attached to a real terminal
 - when `tqdm` is unavailable or output is being captured, the Python components fall back to regular interval-based log lines
 - the JSON summary records the effective per-component progress intervals under `profile_pipeline_progress`
+- the warehouse-loader entry in that summary now also records the effective `batch_size`
 
 This still does not run `terraform apply`, deploy AWS resources, or switch the repository to a full-dataset validation path.
 
@@ -167,6 +168,7 @@ It also records the effective progress configuration for the controlled runtime 
 - `producer.progress_interval`
 - `consumer.progress_interval`
 - `warehouse_loader.progress_interval`
+- `warehouse_loader.batch_size`
 - Python progress mode as `tqdm_if_tty_else_log`
 
 Expected runtime note:
@@ -175,7 +177,16 @@ Expected runtime note:
 - Docker health, Kafka throughput, and local PostgreSQL performance will affect total runtime
 - `PRODUCER_SEND_DELAY_MS=0` stays enforced for controlled runtime validation so the producer does not add artificial delay
 - progress intervals default to `1000`, and the smoke-test helper may lower the interval for smaller bounded runs so at least one visible progress update is still emitted
-- this Stage 22A work improves visibility only; warehouse-loader runtime optimization is intentionally deferred to Stage 22B
+- `WAREHOUSE_LOADER_BATCH_SIZE` defaults to `1000` for the controlled runtime flow so medium and full runs can compare loader timing more meaningfully
+- Stage 22B adds batch insert optimization on top of the Stage 22A progress visibility foundation
+
+## Comparing Before And After Runtime
+
+To compare warehouse-loader behavior before and after this optimization:
+
+- run the same `medium` or `full` command with the same `--max-rows`
+- compare `stage_durations_seconds.warehouse_loader` in the generated JSON summaries
+- keep `WAREHOUSE_LOADER_BATCH_SIZE` fixed first, then vary it intentionally if you want to test different tradeoffs
 
 ## Why `full` Is Not the Default
 

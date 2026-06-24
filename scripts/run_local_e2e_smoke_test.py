@@ -29,6 +29,7 @@ DEFAULT_POSTGRES_DB = "iot_logs"
 DEFAULT_POSTGRES_USER = "iot_user"
 DEFAULT_POSTGRES_PASSWORD = "iot_password"
 DEFAULT_PROGRESS_INTERVAL = 1000
+DEFAULT_WAREHOUSE_LOADER_BATCH_SIZE = 1000
 KAFKA_TOPIC_TOOL_PATH = "/opt/kafka/bin/kafka-topics.sh"
 
 REQUIRED_DIRECTORIES = [
@@ -424,6 +425,7 @@ def create_pipeline_runtime_context(profile_name: str, max_rows: int) -> dict[st
         "producer_progress_interval": progress_interval,
         "consumer_progress_interval": progress_interval,
         "warehouse_loader_progress_interval": progress_interval,
+        "warehouse_loader_batch_size": DEFAULT_WAREHOUSE_LOADER_BATCH_SIZE,
         "python_progress_mode": "tqdm_if_tty_else_log",
     }
 
@@ -665,6 +667,7 @@ def run_controlled_profile_pipeline(
     context["producer_progress_interval"] = progress_interval
     context["consumer_progress_interval"] = progress_interval
     context["warehouse_loader_progress_interval"] = progress_interval
+    context["warehouse_loader_batch_size"] = DEFAULT_WAREHOUSE_LOADER_BATCH_SIZE
 
     if expected_rows == 0:
         return [
@@ -863,6 +866,8 @@ def run_controlled_profile_pipeline(
         f"WAREHOUSE_LOADER_MAX_MESSAGES={expected_rows}",
         "-e",
         f"WAREHOUSE_LOADER_PROGRESS_INTERVAL={context['warehouse_loader_progress_interval']}",
+        "-e",
+        f"WAREHOUSE_LOADER_BATCH_SIZE={context['warehouse_loader_batch_size']}",
         "warehouse-loader",
     ]
     results.append(
@@ -876,13 +881,15 @@ def run_controlled_profile_pipeline(
             ),
             dry_run_detail=(
                 f"Would run the warehouse loader with WAREHOUSE_LOADER_MAX_MESSAGES={expected_rows}, "
-                f"WAREHOUSE_LOADER_PROGRESS_INTERVAL={context['warehouse_loader_progress_interval']}, and isolated Kafka topics."
+                f"WAREHOUSE_LOADER_PROGRESS_INTERVAL={context['warehouse_loader_progress_interval']}, "
+                f"WAREHOUSE_LOADER_BATCH_SIZE={context['warehouse_loader_batch_size']}, and isolated Kafka topics."
             ),
             stream_output_to_temp=True,
             metadata={
                 **context,
                 "component": "warehouse_loader",
                 "progress_interval": context["warehouse_loader_progress_interval"],
+                "batch_size": context["warehouse_loader_batch_size"],
             },
         )
     )
@@ -1571,6 +1578,7 @@ def extract_profile_pipeline_progress(results: list[CheckResult]) -> dict[str, A
         elif result.name == "profile_pipeline_warehouse_loader" and result.metadata:
             progress["warehouse_loader"] = {
                 "progress_interval": result.metadata.get("progress_interval"),
+                "batch_size": result.metadata.get("batch_size"),
                 "mode": result.metadata.get("python_progress_mode"),
             }
 
