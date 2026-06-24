@@ -18,6 +18,8 @@ Its goal is fast confidence, not full data processing. It validates the reposito
 
 The script lives at `scripts/run_local_e2e_smoke_test.py` and uses only the Python standard library.
 
+For the final Stage 21 runbook, validated full-run summary, bottleneck notes, and PR-ready cleanup guidance, see [docs/stage-21-local-e2e-validation.md](docs/stage-21-local-e2e-validation.md).
+
 ## Why This Is Not a Full Dataset Run
 
 The smoke test keeps `sample` as the default profile and caps row-oriented dataset checks with `--max-rows` so normal local validation stays fast, predictable, and inexpensive.

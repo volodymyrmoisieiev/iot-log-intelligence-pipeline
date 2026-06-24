@@ -689,6 +689,8 @@ For the focused Stage 20 guide and expansion roadmap, see [docs/ci-quality-gates
 
 Stage 21D keeps the safe local smoke-test entry point at `scripts/run_local_e2e_smoke_test.py`, preserves `--run-profile-pipeline` plus the backward-compatible `--run-sample-pipeline` alias, adds controlled full-profile runtime validation behind `--allow-full-run`, and updates the focused runbook at [docs/local-e2e-smoke-test.md](docs/local-e2e-smoke-test.md).
 
+For the final Stage 21 runbook, validated full-run example, cleanup guidance, and follow-up ideas, see [docs/stage-21-local-e2e-validation.md](docs/stage-21-local-e2e-validation.md).
+
 What this stage provides:
 
 - a standard-library-only smoke-test helper with `sample`, `medium`, and `full` profile selection
