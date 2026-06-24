@@ -281,6 +281,12 @@ def shorten_output(text: str | None, *, max_lines: int = 20, max_chars: int = 40
     return normalized
 
 
+def read_text_if_exists(path: Path) -> str:
+    if not path.exists():
+        return ""
+    return path.read_text(encoding="utf-8", errors="replace")
+
+
 def is_docker_permission_issue(text: str | None) -> bool:
     if not text:
         return False
@@ -362,6 +368,18 @@ def check_dataset_preflight(
     available_rows = count_total_dataset_rows(dataset_path)
     metadata["available_rows"] = available_rows
     metadata["bounded_rows_for_checks"] = min(available_rows, max_rows)
+    if profile_name == "full" and available_rows < max_rows:
+        return make_result(
+            name="dataset_preflight",
+            status="failed",
+            required=True,
+            details=(
+                f"Resolved full dataset path exists, but only {available_rows} rows are available while "
+                f"{max_rows} rows were requested. Provide a larger full dataset at {dataset_path} or lower --max-rows."
+            ),
+            start_time=start_time,
+            metadata=metadata,
+        )
     details = (
         f"Resolved dataset path: {dataset_path}. Exists: yes. "
         f"Available rows: {available_rows}. "
@@ -796,6 +814,7 @@ def run_controlled_profile_pipeline(
             dry_run_detail=(
                 f"Would run the Python consumer with CONSUMER_MAX_MESSAGES={expected_rows} and isolated Kafka topics."
             ),
+            stream_output_to_temp=True,
         )
     )
     if not dry_run and results[-1].status == "failed":
@@ -831,6 +850,7 @@ def run_controlled_profile_pipeline(
             dry_run_detail=(
                 f"Would run the warehouse loader with WAREHOUSE_LOADER_MAX_MESSAGES={expected_rows} and isolated Kafka topics."
             ),
+            stream_output_to_temp=True,
         )
     )
     if not dry_run and results[-1].status == "failed":
@@ -911,6 +931,7 @@ def run_command(
     dry_run: bool,
     success_detail: str,
     dry_run_detail: str,
+    stream_output_to_temp: bool = False,
 ) -> CheckResult:
     start_time = time.time()
     if dry_run:
@@ -924,14 +945,42 @@ def run_command(
         )
 
     try:
-        result = subprocess.run(
-            command,
-            cwd=cwd,
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        if stream_output_to_temp:
+            stdout_file = tempfile.NamedTemporaryFile(suffix=".log", delete=False)
+            stderr_file = tempfile.NamedTemporaryFile(suffix=".log", delete=False)
+            stdout_path = Path(stdout_file.name)
+            stderr_path = Path(stderr_file.name)
+            stdout_file.close()
+            stderr_file.close()
+            try:
+                with stdout_path.open("w", encoding="utf-8") as stdout_handle, stderr_path.open(
+                    "w", encoding="utf-8"
+                ) as stderr_handle:
+                    result = subprocess.run(
+                        command,
+                        cwd=cwd,
+                        env=env,
+                        stdout=stdout_handle,
+                        stderr=stderr_handle,
+                        text=True,
+                        check=False,
+                    )
+                stdout_text = read_text_if_exists(stdout_path)
+                stderr_text = read_text_if_exists(stderr_path)
+            finally:
+                stdout_path.unlink(missing_ok=True)
+                stderr_path.unlink(missing_ok=True)
+        else:
+            result = subprocess.run(
+                command,
+                cwd=cwd,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            stdout_text = result.stdout
+            stderr_text = result.stderr
     except FileNotFoundError as exc:
         return make_result(
             name=name,
@@ -952,8 +1001,8 @@ def run_command(
         start_time=start_time,
         command=command,
         return_code=result.returncode,
-        stdout_excerpt=shorten_output(result.stdout),
-        stderr_excerpt=shorten_output(result.stderr),
+        stdout_excerpt=shorten_output(stdout_text),
+        stderr_excerpt=shorten_output(stderr_text),
     )
 
 
@@ -1436,6 +1485,39 @@ def summarize_results(results: list[CheckResult]) -> dict[str, Any]:
     }
 
 
+def extract_stage_durations(results: list[CheckResult], run_profile_pipeline: bool) -> dict[str, float]:
+    duration_by_name = {
+        result.name: result.duration_seconds for result in results if result.duration_seconds
+    }
+    stage_durations: dict[str, float] = {}
+
+    data_contract_duration = duration_by_name.get("data_contract_validation")
+    if data_contract_duration is not None:
+        stage_durations["data_contract_validation"] = data_contract_duration
+
+    if run_profile_pipeline:
+        for stage_name, result_name in (
+            ("producer", "profile_pipeline_producer"),
+            ("consumer", "profile_pipeline_consumer"),
+            ("warehouse_loader", "profile_pipeline_warehouse_loader"),
+            ("anomaly_detection", "profile_pipeline_anomaly_detection_read_only"),
+        ):
+            duration = duration_by_name.get(result_name)
+            if duration is not None:
+                stage_durations[stage_name] = duration
+        postgres_duration = duration_by_name.get("profile_pipeline_verify_postgres_deltas")
+        if postgres_duration is None:
+            postgres_duration = duration_by_name.get("profile_pipeline_post_run_postgres_counts")
+        if postgres_duration is not None:
+            stage_durations["postgresql_verification"] = postgres_duration
+    else:
+        anomaly_duration = duration_by_name.get("anomaly_detection_read_only")
+        if anomaly_duration is not None:
+            stage_durations["anomaly_detection"] = anomaly_duration
+
+    return stage_durations
+
+
 def print_human_summary(
     *,
     profile_name: str,
@@ -1461,6 +1543,10 @@ def build_output_payload(
     results: list[CheckResult],
 ) -> dict[str, Any]:
     summary = summarize_results(results)
+    stage_durations = extract_stage_durations(
+        results=results,
+        run_profile_pipeline=args.run_profile_pipeline,
+    )
     return {
         "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "project_root": str(PROJECT_ROOT),
@@ -1486,6 +1572,7 @@ def build_output_payload(
             "terraform": args.skip_terraform,
         },
         "summary": summary,
+        "stage_durations_seconds": stage_durations,
         "checks": [asdict(result) for result in results],
     }
 

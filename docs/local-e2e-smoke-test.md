@@ -108,6 +108,57 @@ If `data/processed/medium_iot_logs.csv` is missing, the script fails clearly and
 python .\scripts\create_dataset_profile.py --input .\data\raw\RT_IOT2022.csv --output .\data\processed\medium_iot_logs.csv --rows 10000 --overwrite
 ```
 
+## Controlled Full Runtime E2E Example
+
+Use the `full` profile only for an intentional larger validation run, and only with the explicit `--allow-full-run` safeguard:
+
+```powershell
+.\.venv-observability\Scripts\python.exe .\scripts\run_local_e2e_smoke_test.py --profile full --max-rows 100000 --run-profile-pipeline --allow-full-run --output-json docs/e2e-smoke-test-local.json
+```
+
+Why `--allow-full-run` is required:
+
+- a full-profile run is heavier and slower than sample or medium validation
+- it is easier to consume more local CPU, Docker, Kafka, and PostgreSQL time by mistake
+- it should remain an intentional action rather than the default local workflow
+
+The script performs stronger full-run preflight checks before runtime execution:
+
+- resolves the expected full dataset path
+- fails clearly if `data/raw/full_iot_logs.csv` is missing
+- counts available rows
+- fails clearly if fewer rows are available than requested by `--max-rows`
+
+If the full dataset is missing, place it at:
+
+```text
+data/raw/full_iot_logs.csv
+```
+
+Expected success for the controlled full run means:
+
+- producer passed
+- consumer passed
+- warehouse loader passed
+- PostgreSQL delta equals the expected bounded row count
+- data contract validation passed
+- anomaly detection passed, or reports a clear skip/failure reason in the JSON summary
+
+The JSON report now records stage durations for:
+
+- data contract validation
+- producer
+- consumer
+- warehouse loader
+- PostgreSQL verification
+- anomaly detection
+
+Expected runtime note:
+
+- a `100000`-row run can take noticeably longer than sample or medium validation
+- Docker health, Kafka throughput, and local PostgreSQL performance will affect total runtime
+- `PRODUCER_SEND_DELAY_MS=0` stays enforced for controlled runtime validation so the producer does not add artificial delay
+
 ## Why `full` Is Not the Default
 
 The `full` profile is intentionally heavier, environment-dependent, and slower. Making it the default would turn a quick safety check into a long and fragile validation path.
@@ -118,10 +169,10 @@ Keeping `sample` as the default helps preserve:
 - lower resource usage on developer machines
 - safer validation before intentional larger-scale runs
 
-Stage 21C extends controlled runtime validation to the prepared `medium` profile, while `full` or `100k` style validation is still deferred to Stage 21D. The script now refuses `--profile full --run-profile-pipeline` unless `--allow-full-run` is explicitly provided.
+Stage 21D adds controlled `full` validation up to `100000` rows, but keeps it behind `--allow-full-run` so it stays intentional and never becomes the default path.
 
 ## How This Prepares Future Full Validation
 
 This smoke-test foundation establishes a reusable entry point, consistent JSON reporting, bounded dataset inspection, and safe Terraform/data-contract/anomaly checks that future stages can extend into a fuller local-system validation workflow.
 
-With Stage 21C, that foundation now includes isolated sample and medium runtime flows with bounded producer, consumer, and loader execution. Later Stage 21D work can build on the same entry point for fuller `100k` or full-profile validation without changing the current runtime behavior of existing pipeline components.
+With Stage 21D, that foundation now includes isolated sample, medium, and controlled full runtime flows with bounded producer, consumer, and loader execution, while still preserving safe defaults for normal local development.
