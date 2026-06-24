@@ -15,6 +15,7 @@ const (
 	defaultDatasetProfile            = "sample"
 	defaultSendDelayMS               = 250
 	defaultProducerMaxRows           = 0
+	defaultProducerProgressInterval  = 1000
 	datasetProfileSample             = "sample"
 	datasetProfileMedium             = "medium"
 	datasetProfileFull               = "full"
@@ -27,6 +28,7 @@ type Config struct {
 	InputFile        string
 	MaxRows          int
 	SendDelayMS      int
+	ProgressInterval int
 }
 
 var datasetProfilePaths = map[string]string{
@@ -57,6 +59,11 @@ func LoadConfig() (Config, error) {
 		return Config{}, err
 	}
 
+	progressInterval, err := getEnvPositiveInt("PRODUCER_PROGRESS_INTERVAL", defaultProducerProgressInterval)
+	if err != nil {
+		return Config{}, err
+	}
+
 	inputFile, err := resolveInputFile(
 		datasetProfile,
 		strings.TrimSpace(os.Getenv("PRODUCER_INPUT_FILE")),
@@ -73,6 +80,7 @@ func LoadConfig() (Config, error) {
 		InputFile:        inputFile,
 		MaxRows:          maxRows,
 		SendDelayMS:      delayMS,
+		ProgressInterval: progressInterval,
 	}, nil
 }
 
@@ -214,4 +222,17 @@ func getEnvInt(key string, fallback int) (int, error) {
 	}
 
 	return parsed, nil
+}
+
+func getEnvPositiveInt(key string, fallback int) (int, error) {
+	value, err := getEnvInt(key, fallback)
+	if err != nil {
+		return 0, err
+	}
+
+	if value <= 0 {
+		return 0, fmt.Errorf("%s must be greater than zero", key)
+	}
+
+	return value, nil
 }

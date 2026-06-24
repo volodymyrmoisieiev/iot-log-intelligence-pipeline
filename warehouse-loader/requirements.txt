@@ -1,3 +1,4 @@
 confluent-kafka==2.5.3
 psycopg[binary]==3.2.9
+tqdm==4.67.1
 pytest==8.3.5

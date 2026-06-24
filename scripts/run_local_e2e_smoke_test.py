@@ -28,6 +28,8 @@ DEFAULT_POSTGRES_PORT = "5432"
 DEFAULT_POSTGRES_DB = "iot_logs"
 DEFAULT_POSTGRES_USER = "iot_user"
 DEFAULT_POSTGRES_PASSWORD = "iot_password"
+DEFAULT_PROGRESS_INTERVAL = 1000
+DEFAULT_WAREHOUSE_LOADER_BATCH_SIZE = 1000
 KAFKA_TOPIC_TOOL_PATH = "/opt/kafka/bin/kafka-topics.sh"
 
 REQUIRED_DIRECTORIES = [
@@ -400,12 +402,17 @@ def build_runtime_id(prefix: str) -> str:
     return f"{prefix}-{timestamp}-{os.getpid()}"
 
 
+def choose_progress_interval(expected_rows: int) -> int:
+    return max(1, min(DEFAULT_PROGRESS_INTERVAL, expected_rows))
+
+
 def create_pipeline_runtime_context(profile_name: str, max_rows: int) -> dict[str, Any]:
     runtime_id = build_runtime_id(f"stage21c-{profile_name}")
     topic_suffix = runtime_id.replace("-", "_")
     raw_topic = f"iot_raw_logs_{topic_suffix}"
     processed_topic = f"iot_processed_logs_{topic_suffix}"
     invalid_topic = f"iot_invalid_logs_{topic_suffix}"
+    progress_interval = choose_progress_interval(max_rows)
     return {
         "runtime_id": runtime_id,
         "profile": profile_name,
@@ -415,6 +422,11 @@ def create_pipeline_runtime_context(profile_name: str, max_rows: int) -> dict[st
         "consumer_group_id": f"{runtime_id}-consumer",
         "loader_group_id": f"{runtime_id}-loader",
         "max_rows": max_rows,
+        "producer_progress_interval": progress_interval,
+        "consumer_progress_interval": progress_interval,
+        "warehouse_loader_progress_interval": progress_interval,
+        "warehouse_loader_batch_size": DEFAULT_WAREHOUSE_LOADER_BATCH_SIZE,
+        "python_progress_mode": "tqdm_if_tty_else_log",
     }
 
 
@@ -649,8 +661,13 @@ def run_controlled_profile_pipeline(
 ) -> list[CheckResult]:
     expected_rows = count_bounded_dataset_rows(dataset_path=dataset_path, max_rows=max_rows)
     context = create_pipeline_runtime_context(profile_name=profile_name, max_rows=max_rows)
+    progress_interval = choose_progress_interval(expected_rows)
     context["resolved_dataset_path"] = str(dataset_path)
     context["expected_dataset_rows"] = expected_rows
+    context["producer_progress_interval"] = progress_interval
+    context["consumer_progress_interval"] = progress_interval
+    context["warehouse_loader_progress_interval"] = progress_interval
+    context["warehouse_loader_batch_size"] = DEFAULT_WAREHOUSE_LOADER_BATCH_SIZE
 
     if expected_rows == 0:
         return [
@@ -761,6 +778,8 @@ def run_controlled_profile_pipeline(
         "-e",
         f"PRODUCER_MAX_ROWS={expected_rows}",
         "-e",
+        f"PRODUCER_PROGRESS_INTERVAL={context['producer_progress_interval']}",
+        "-e",
         "PRODUCER_SEND_DELAY_MS=0",
         "go-producer",
     ]
@@ -775,8 +794,13 @@ def run_controlled_profile_pipeline(
             ),
             dry_run_detail=(
                 f"Would run the Go producer with DATASET_PROFILE={profile_name}, PRODUCER_MAX_ROWS={expected_rows}, "
-                "and PRODUCER_SEND_DELAY_MS=0."
+                f"PRODUCER_PROGRESS_INTERVAL={context['producer_progress_interval']}, and PRODUCER_SEND_DELAY_MS=0."
             ),
+            metadata={
+                **context,
+                "component": "producer",
+                "progress_interval": context["producer_progress_interval"],
+            },
         )
     )
     if not dry_run and results[-1].status == "failed":
@@ -799,7 +823,7 @@ def run_controlled_profile_pipeline(
         "-e",
         f"CONSUMER_MAX_MESSAGES={expected_rows}",
         "-e",
-        "CONSUMER_PROGRESS_INTERVAL=250",
+        f"CONSUMER_PROGRESS_INTERVAL={context['consumer_progress_interval']}",
         "python-consumer",
     ]
     results.append(
@@ -812,9 +836,15 @@ def run_controlled_profile_pipeline(
                 f"Ran the Python consumer with CONSUMER_MAX_MESSAGES={expected_rows} on the isolated {profile_name} topics."
             ),
             dry_run_detail=(
-                f"Would run the Python consumer with CONSUMER_MAX_MESSAGES={expected_rows} and isolated Kafka topics."
+                f"Would run the Python consumer with CONSUMER_MAX_MESSAGES={expected_rows}, "
+                f"CONSUMER_PROGRESS_INTERVAL={context['consumer_progress_interval']}, and isolated Kafka topics."
             ),
             stream_output_to_temp=True,
+            metadata={
+                **context,
+                "component": "consumer",
+                "progress_interval": context["consumer_progress_interval"],
+            },
         )
     )
     if not dry_run and results[-1].status == "failed":
@@ -835,7 +865,9 @@ def run_controlled_profile_pipeline(
         "-e",
         f"WAREHOUSE_LOADER_MAX_MESSAGES={expected_rows}",
         "-e",
-        "WAREHOUSE_LOADER_PROGRESS_INTERVAL=250",
+        f"WAREHOUSE_LOADER_PROGRESS_INTERVAL={context['warehouse_loader_progress_interval']}",
+        "-e",
+        f"WAREHOUSE_LOADER_BATCH_SIZE={context['warehouse_loader_batch_size']}",
         "warehouse-loader",
     ]
     results.append(
@@ -848,9 +880,17 @@ def run_controlled_profile_pipeline(
                 f"Ran the warehouse loader with WAREHOUSE_LOADER_MAX_MESSAGES={expected_rows} on the isolated {profile_name} topics."
             ),
             dry_run_detail=(
-                f"Would run the warehouse loader with WAREHOUSE_LOADER_MAX_MESSAGES={expected_rows} and isolated Kafka topics."
+                f"Would run the warehouse loader with WAREHOUSE_LOADER_MAX_MESSAGES={expected_rows}, "
+                f"WAREHOUSE_LOADER_PROGRESS_INTERVAL={context['warehouse_loader_progress_interval']}, "
+                f"WAREHOUSE_LOADER_BATCH_SIZE={context['warehouse_loader_batch_size']}, and isolated Kafka topics."
             ),
             stream_output_to_temp=True,
+            metadata={
+                **context,
+                "component": "warehouse_loader",
+                "progress_interval": context["warehouse_loader_progress_interval"],
+                "batch_size": context["warehouse_loader_batch_size"],
+            },
         )
     )
     if not dry_run and results[-1].status == "failed":
@@ -932,6 +972,7 @@ def run_command(
     success_detail: str,
     dry_run_detail: str,
     stream_output_to_temp: bool = False,
+    metadata: dict[str, Any] | None = None,
 ) -> CheckResult:
     start_time = time.time()
     if dry_run:
@@ -942,6 +983,7 @@ def run_command(
             details=dry_run_detail,
             start_time=start_time,
             command=command,
+            metadata=metadata,
         )
 
     try:
@@ -989,6 +1031,7 @@ def run_command(
             details=f"Command not found: {command[0]} ({exc})",
             start_time=start_time,
             command=command,
+            metadata=metadata,
         )
 
     status = "passed" if result.returncode == 0 else "failed"
@@ -1003,6 +1046,7 @@ def run_command(
         return_code=result.returncode,
         stdout_excerpt=shorten_output(stdout_text),
         stderr_excerpt=shorten_output(stderr_text),
+        metadata=metadata,
     )
 
 
@@ -1518,6 +1562,29 @@ def extract_stage_durations(results: list[CheckResult], run_profile_pipeline: bo
     return stage_durations
 
 
+def extract_profile_pipeline_progress(results: list[CheckResult]) -> dict[str, Any] | None:
+    progress: dict[str, Any] = {}
+
+    for result in results:
+        if result.name == "profile_pipeline_producer" and result.metadata:
+            progress["producer"] = {
+                "progress_interval": result.metadata.get("progress_interval"),
+            }
+        elif result.name == "profile_pipeline_consumer" and result.metadata:
+            progress["consumer"] = {
+                "progress_interval": result.metadata.get("progress_interval"),
+                "mode": result.metadata.get("python_progress_mode"),
+            }
+        elif result.name == "profile_pipeline_warehouse_loader" and result.metadata:
+            progress["warehouse_loader"] = {
+                "progress_interval": result.metadata.get("progress_interval"),
+                "batch_size": result.metadata.get("batch_size"),
+                "mode": result.metadata.get("python_progress_mode"),
+            }
+
+    return progress or None
+
+
 def print_human_summary(
     *,
     profile_name: str,
@@ -1547,6 +1614,7 @@ def build_output_payload(
         results=results,
         run_profile_pipeline=args.run_profile_pipeline,
     )
+    profile_pipeline_progress = extract_profile_pipeline_progress(results)
     return {
         "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "project_root": str(PROJECT_ROOT),
@@ -1573,6 +1641,7 @@ def build_output_payload(
         },
         "summary": summary,
         "stage_durations_seconds": stage_durations,
+        "profile_pipeline_progress": profile_pipeline_progress,
         "checks": [asdict(result) for result in results],
     }
 

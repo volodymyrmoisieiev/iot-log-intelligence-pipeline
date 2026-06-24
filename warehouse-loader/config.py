@@ -14,6 +14,7 @@ DEFAULT_WAREHOUSE_LOADER_GROUP_ID = "iot-warehouse-loader"
 DEFAULT_WAREHOUSE_LOADER_MAX_MESSAGES = 0
 DEFAULT_WAREHOUSE_LOADER_IDLE_TIMEOUT_SECONDS = 10
 DEFAULT_WAREHOUSE_LOADER_PROGRESS_INTERVAL = 1000
+DEFAULT_WAREHOUSE_LOADER_BATCH_SIZE = 1000
 
 
 @dataclass(frozen=True)
@@ -30,6 +31,7 @@ class Config:
     warehouse_loader_max_messages: int
     warehouse_loader_idle_timeout_seconds: int
     warehouse_loader_progress_interval: int
+    warehouse_loader_batch_size: int
 
 
 def load_config() -> Config:
@@ -57,6 +59,10 @@ def load_config() -> Config:
         warehouse_loader_progress_interval=_get_env_positive_int(
             "WAREHOUSE_LOADER_PROGRESS_INTERVAL",
             DEFAULT_WAREHOUSE_LOADER_PROGRESS_INTERVAL,
+        ),
+        warehouse_loader_batch_size=_get_env_positive_int(
+            "WAREHOUSE_LOADER_BATCH_SIZE",
+            DEFAULT_WAREHOUSE_LOADER_BATCH_SIZE,
         ),
     )
 
