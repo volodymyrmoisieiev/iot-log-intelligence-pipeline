@@ -19,6 +19,9 @@ func NewProducer(cfg Config) *Producer {
 			Addr:         kafka.TCP(cfg.BootstrapServers...),
 			Topic:        cfg.RawTopic,
 			Balancer:     &kafka.LeastBytes{},
+			// Keep synchronous semantics, but avoid the kafka-go 1s default batch wait
+			// so controlled medium-profile validation remains practical.
+			BatchTimeout: time.Millisecond,
 			RequiredAcks: kafka.RequireOne,
 		},
 		topic: cfg.RawTopic,
