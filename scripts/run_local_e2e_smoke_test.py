@@ -23,6 +23,12 @@ DATASET_PROFILES_PATH = PROJECT_ROOT / "data" / "dataset_profiles.yml"
 CONTRACT_PATH = PROJECT_ROOT / "contracts" / "iot_raw_log_contract.yml"
 AIRFLOW_DAG_DIR = PROJECT_ROOT / "airflow" / "dags"
 TERRAFORM_ROOT = PROJECT_ROOT / "infra" / "aws-orchestration"
+DEFAULT_POSTGRES_HOST = "localhost"
+DEFAULT_POSTGRES_PORT = "5432"
+DEFAULT_POSTGRES_DB = "iot_logs"
+DEFAULT_POSTGRES_USER = "iot_user"
+DEFAULT_POSTGRES_PASSWORD = "iot_password"
+KAFKA_TOPIC_TOOL_PATH = "/opt/kafka/bin/kafka-topics.sh"
 
 REQUIRED_DIRECTORIES = [
     "airflow",
@@ -76,6 +82,12 @@ MISSING_RUNTIME_HINTS = (
     "no such container",
 )
 
+DOCKER_PERMISSION_HINTS = (
+    "permission denied while trying to connect to the docker api",
+    "cannot connect to the docker daemon",
+    "access is denied",
+)
+
 
 class SmokeTestConfigurationError(Exception):
     """Raised when smoke test inputs are invalid."""
@@ -122,6 +134,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output-json",
         help="Optional path for a JSON smoke test summary.",
+    )
+    parser.add_argument(
+        "--run-sample-pipeline",
+        action="store_true",
+        help=(
+            "Run a controlled sample-profile producer/consumer/warehouse-loader flow "
+            "with bounded row limits."
+        ),
     )
     parser.add_argument(
         "--skip-airflow",
@@ -190,6 +210,11 @@ def load_dataset_profiles(path: Path) -> dict[str, dict[str, Any]]:
 def ensure_args_are_valid(args: argparse.Namespace) -> None:
     if args.max_rows <= 0:
         raise SmokeTestConfigurationError("--max-rows must be a positive integer.")
+    if args.run_sample_pipeline and args.profile != "sample":
+        raise SmokeTestConfigurationError(
+            "Stage 21B controlled runtime mode currently supports only --profile sample. "
+            "Larger-profile validation is reserved for later Stage 21C/21D work."
+        )
 
 
 def make_result(
@@ -237,6 +262,535 @@ def shorten_output(text: str | None, *, max_lines: int = 20, max_chars: int = 40
     if len(normalized) > max_chars:
         normalized = "[...]" + normalized[-(max_chars - 5) :]
     return normalized
+
+
+def is_docker_permission_issue(text: str | None) -> bool:
+    if not text:
+        return False
+    lowered = text.lower()
+    return any(hint in lowered for hint in DOCKER_PERMISSION_HINTS)
+
+
+def count_dataset_rows(dataset_path: Path, max_rows: int) -> int:
+    with dataset_path.open("r", newline="", encoding="utf-8-sig") as source_file:
+        reader = csv.reader(source_file)
+        header = next(reader, None)
+        if header is None:
+            raise SmokeTestConfigurationError(
+                f"Dataset file is missing a header row: {dataset_path}"
+            )
+
+        row_count = 0
+        for _ in reader:
+            row_count += 1
+            if row_count >= max_rows:
+                break
+        return row_count
+
+
+def build_runtime_id(prefix: str) -> str:
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return f"{prefix}-{timestamp}-{os.getpid()}"
+
+
+def create_pipeline_runtime_context(max_rows: int) -> dict[str, Any]:
+    runtime_id = build_runtime_id("stage21b-sample")
+    topic_suffix = runtime_id.replace("-", "_")
+    raw_topic = f"iot_raw_logs_{topic_suffix}"
+    processed_topic = f"iot_processed_logs_{topic_suffix}"
+    invalid_topic = f"iot_invalid_logs_{topic_suffix}"
+    return {
+        "runtime_id": runtime_id,
+        "raw_topic": raw_topic,
+        "processed_topic": processed_topic,
+        "invalid_topic": invalid_topic,
+        "consumer_group_id": f"{runtime_id}-consumer",
+        "loader_group_id": f"{runtime_id}-loader",
+        "max_rows": max_rows,
+    }
+
+
+def run_command_sequence(
+    *,
+    name: str,
+    commands: list[list[str]],
+    required: bool,
+    cwd: Path = PROJECT_ROOT,
+    env: dict[str, str] | None = None,
+    dry_run: bool,
+    success_detail: str,
+    dry_run_detail: str,
+    metadata: dict[str, Any] | None = None,
+) -> CheckResult:
+    start_time = time.time()
+    if dry_run:
+        return make_result(
+            name=name,
+            status="dry_run",
+            required=required,
+            details=dry_run_detail,
+            start_time=start_time,
+            metadata={"commands": commands, **(metadata or {})},
+        )
+
+    combined_stdout: list[str] = []
+    combined_stderr: list[str] = []
+
+    for command in commands:
+        try:
+            result = subprocess.run(
+                command,
+                cwd=cwd,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except FileNotFoundError as exc:
+            return make_result(
+                name=name,
+                status="failed",
+                required=required,
+                details=f"Command not found: {command[0]} ({exc})",
+                start_time=start_time,
+                command=command,
+                metadata=metadata,
+            )
+
+        if result.stdout:
+            combined_stdout.append("$ " + " ".join(command))
+            combined_stdout.append(result.stdout.strip())
+        if result.stderr:
+            combined_stderr.append("$ " + " ".join(command))
+            combined_stderr.append(result.stderr.strip())
+
+        if result.returncode != 0:
+            return make_result(
+                name=name,
+                status="failed",
+                required=required,
+                details="Command sequence returned a non-zero exit code.",
+                start_time=start_time,
+                command=command,
+                return_code=result.returncode,
+                stdout_excerpt=shorten_output("\n".join(combined_stdout)),
+                stderr_excerpt=shorten_output("\n".join(combined_stderr)),
+                metadata=metadata,
+            )
+
+    return make_result(
+        name=name,
+        status="passed",
+        required=required,
+        details=success_detail,
+        start_time=start_time,
+        stdout_excerpt=shorten_output("\n".join(combined_stdout)),
+        stderr_excerpt=shorten_output("\n".join(combined_stderr)),
+        metadata=metadata,
+    )
+
+
+def build_postgres_count_command() -> list[str]:
+    postgres_user = os.getenv("POSTGRES_USER", DEFAULT_POSTGRES_USER)
+    postgres_db = os.getenv("POSTGRES_DB", DEFAULT_POSTGRES_DB)
+    postgres_password = os.getenv("POSTGRES_PASSWORD", DEFAULT_POSTGRES_PASSWORD)
+    return [
+        "docker",
+        "compose",
+        "exec",
+        "-T",
+        "-e",
+        f"PGPASSWORD={postgres_password}",
+        "postgres",
+        "psql",
+        "-U",
+        postgres_user,
+        "-d",
+        postgres_db,
+        "-t",
+        "-A",
+        "-F",
+        ",",
+        "-c",
+        (
+            "SELECT "
+            "(SELECT COUNT(*) FROM processed_iot_logs) AS processed_count, "
+            "(SELECT COUNT(*) FROM invalid_iot_logs) AS invalid_count;"
+        ),
+    ]
+
+
+def read_postgres_counts() -> tuple[CheckResult, dict[str, int] | None]:
+    start_time = time.time()
+    command = build_postgres_count_command()
+
+    try:
+        result = subprocess.run(
+            command,
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        return (
+            make_result(
+                name="sample_pipeline_postgres_counts",
+                status="failed",
+                required=True,
+                details=f"Command not found: {command[0]} ({exc})",
+                start_time=start_time,
+                command=command,
+            ),
+            None,
+        )
+
+    if result.returncode != 0:
+        return (
+            make_result(
+                name="sample_pipeline_postgres_counts",
+                status="failed",
+                required=True,
+                details="Failed to read PostgreSQL row counts after the controlled runtime flow.",
+                start_time=start_time,
+                command=command,
+                return_code=result.returncode,
+                stdout_excerpt=shorten_output(result.stdout),
+                stderr_excerpt=shorten_output(result.stderr),
+            ),
+            None,
+        )
+
+    raw_output = (result.stdout or "").strip().splitlines()
+    if not raw_output:
+        return (
+            make_result(
+                name="sample_pipeline_postgres_counts",
+                status="failed",
+                required=True,
+                details="PostgreSQL row-count query returned no output.",
+                start_time=start_time,
+                command=command,
+                stdout_excerpt=shorten_output(result.stdout),
+                stderr_excerpt=shorten_output(result.stderr),
+            ),
+            None,
+        )
+
+    last_line = raw_output[-1].strip()
+    parts = last_line.split(",")
+    if len(parts) != 2:
+        return (
+            make_result(
+                name="sample_pipeline_postgres_counts",
+                status="failed",
+                required=True,
+                details="PostgreSQL row-count query returned an unexpected format.",
+                start_time=start_time,
+                command=command,
+                stdout_excerpt=shorten_output(result.stdout),
+                stderr_excerpt=shorten_output(result.stderr),
+            ),
+            None,
+        )
+
+    try:
+        counts = {
+            "processed_count": int(parts[0].strip()),
+            "invalid_count": int(parts[1].strip()),
+        }
+    except ValueError:
+        return (
+            make_result(
+                name="sample_pipeline_postgres_counts",
+                status="failed",
+                required=True,
+                details="PostgreSQL row-count query returned non-integer values.",
+                start_time=start_time,
+                command=command,
+                stdout_excerpt=shorten_output(result.stdout),
+                stderr_excerpt=shorten_output(result.stderr),
+            ),
+            None,
+        )
+
+    return (
+        make_result(
+            name="sample_pipeline_postgres_counts",
+            status="passed",
+            required=True,
+            details="Captured PostgreSQL processed/invalid row counts.",
+            start_time=start_time,
+            command=command,
+            return_code=result.returncode,
+            stdout_excerpt=shorten_output(result.stdout),
+            stderr_excerpt=shorten_output(result.stderr),
+            metadata=counts,
+        ),
+        counts,
+    )
+
+
+def run_controlled_sample_pipeline(
+    *,
+    dataset_path: Path,
+    max_rows: int,
+    dry_run: bool,
+    skip_anomaly_detection: bool,
+) -> list[CheckResult]:
+    expected_rows = count_dataset_rows(dataset_path=dataset_path, max_rows=max_rows)
+    context = create_pipeline_runtime_context(max_rows=max_rows)
+    context["expected_dataset_rows"] = expected_rows
+
+    if expected_rows == 0:
+        return [
+            make_result(
+                name="sample_pipeline_runtime",
+                status="failed",
+                required=True,
+                details="The selected sample dataset has no data rows to exercise in runtime mode.",
+                metadata=context,
+            )
+        ]
+
+    results: list[CheckResult] = []
+    results.append(
+        run_command(
+            name="sample_pipeline_start_services",
+            command=["docker", "compose", "up", "-d", "kafka", "kafka-init", "postgres"],
+            required=True,
+            dry_run=dry_run,
+            success_detail="Started required Docker Compose services for the controlled sample runtime flow.",
+            dry_run_detail=(
+                "Would start kafka, kafka-init, and postgres for the controlled sample runtime flow."
+            ),
+            env=None,
+        )
+    )
+    if not dry_run and results[-1].status == "failed":
+        return results
+
+    topic_commands = [
+        [
+            "docker",
+            "compose",
+            "exec",
+            "-T",
+            "kafka",
+            KAFKA_TOPIC_TOOL_PATH,
+            "--bootstrap-server",
+            "localhost:9092",
+            "--create",
+            "--if-not-exists",
+            "--topic",
+            topic_name,
+            "--partitions",
+            "1",
+            "--replication-factor",
+            "1",
+        ]
+        for topic_name in (
+            context["raw_topic"],
+            context["processed_topic"],
+            context["invalid_topic"],
+        )
+    ]
+    results.append(
+        run_command_sequence(
+            name="sample_pipeline_create_topics",
+            commands=topic_commands,
+            required=True,
+            dry_run=dry_run,
+            success_detail="Created isolated Kafka topics for the controlled sample runtime flow.",
+            dry_run_detail="Would create isolated Kafka topics for raw, processed, and invalid sample-runtime messages.",
+            metadata={
+                "raw_topic": context["raw_topic"],
+                "processed_topic": context["processed_topic"],
+                "invalid_topic": context["invalid_topic"],
+            },
+        )
+    )
+    if not dry_run and results[-1].status == "failed":
+        return results
+
+    pre_counts_result, pre_counts = read_postgres_counts() if not dry_run else (
+        make_result(
+            name="sample_pipeline_pre_run_postgres_counts",
+            status="dry_run",
+            required=True,
+            details="Would capture PostgreSQL row counts before running the controlled sample pipeline.",
+            metadata=context,
+        ),
+        None,
+    )
+    pre_counts_result.name = "sample_pipeline_pre_run_postgres_counts"
+    results.append(pre_counts_result)
+    if not dry_run and results[-1].status == "failed":
+        return results
+
+    producer_command = [
+        "docker",
+        "compose",
+        "run",
+        "--rm",
+        "--build",
+        "-e",
+        "DATASET_PROFILE=sample",
+        "-e",
+        f"KAFKA_RAW_TOPIC={context['raw_topic']}",
+        "-e",
+        f"PRODUCER_MAX_ROWS={expected_rows}",
+        "-e",
+        "PRODUCER_SEND_DELAY_MS=0",
+        "go-producer",
+    ]
+    results.append(
+        run_command(
+            name="sample_pipeline_producer",
+            command=producer_command,
+            required=True,
+            dry_run=dry_run,
+            success_detail=(
+                f"Ran the Go producer against the sample profile with a row limit of {expected_rows}."
+            ),
+            dry_run_detail=(
+                f"Would run the Go producer with DATASET_PROFILE=sample, PRODUCER_MAX_ROWS={expected_rows}, "
+                "and PRODUCER_SEND_DELAY_MS=0."
+            ),
+        )
+    )
+    if not dry_run and results[-1].status == "failed":
+        return results
+
+    consumer_command = [
+        "docker",
+        "compose",
+        "run",
+        "--rm",
+        "--build",
+        "-e",
+        f"KAFKA_RAW_TOPIC={context['raw_topic']}",
+        "-e",
+        f"KAFKA_PROCESSED_TOPIC={context['processed_topic']}",
+        "-e",
+        f"KAFKA_INVALID_TOPIC={context['invalid_topic']}",
+        "-e",
+        f"CONSUMER_GROUP_ID={context['consumer_group_id']}",
+        "-e",
+        f"CONSUMER_MAX_MESSAGES={expected_rows}",
+        "-e",
+        "CONSUMER_PROGRESS_INTERVAL=250",
+        "python-consumer",
+    ]
+    results.append(
+        run_command(
+            name="sample_pipeline_consumer",
+            command=consumer_command,
+            required=True,
+            dry_run=dry_run,
+            success_detail=(
+                f"Ran the Python consumer with CONSUMER_MAX_MESSAGES={expected_rows} on the isolated sample topics."
+            ),
+            dry_run_detail=(
+                f"Would run the Python consumer with CONSUMER_MAX_MESSAGES={expected_rows} and isolated Kafka topics."
+            ),
+        )
+    )
+    if not dry_run and results[-1].status == "failed":
+        return results
+
+    loader_command = [
+        "docker",
+        "compose",
+        "run",
+        "--rm",
+        "--build",
+        "-e",
+        f"KAFKA_PROCESSED_TOPIC={context['processed_topic']}",
+        "-e",
+        f"KAFKA_INVALID_TOPIC={context['invalid_topic']}",
+        "-e",
+        f"WAREHOUSE_LOADER_GROUP_ID={context['loader_group_id']}",
+        "-e",
+        f"WAREHOUSE_LOADER_MAX_MESSAGES={expected_rows}",
+        "-e",
+        "WAREHOUSE_LOADER_PROGRESS_INTERVAL=250",
+        "warehouse-loader",
+    ]
+    results.append(
+        run_command(
+            name="sample_pipeline_warehouse_loader",
+            command=loader_command,
+            required=True,
+            dry_run=dry_run,
+            success_detail=(
+                f"Ran the warehouse loader with WAREHOUSE_LOADER_MAX_MESSAGES={expected_rows} on the isolated sample topics."
+            ),
+            dry_run_detail=(
+                f"Would run the warehouse loader with WAREHOUSE_LOADER_MAX_MESSAGES={expected_rows} and isolated Kafka topics."
+            ),
+        )
+    )
+    if not dry_run and results[-1].status == "failed":
+        return results
+
+    if dry_run:
+        results.append(
+            make_result(
+                name="sample_pipeline_verify_postgres_deltas",
+                status="dry_run",
+                required=True,
+                details="Would compare PostgreSQL row-count deltas after the controlled sample runtime flow.",
+                metadata=context,
+            )
+        )
+    else:
+        post_counts_result, post_counts = read_postgres_counts()
+        post_counts_result.name = "sample_pipeline_post_run_postgres_counts"
+        results.append(post_counts_result)
+        if results[-1].status == "failed":
+            return results
+
+        if pre_counts is not None and post_counts is not None:
+            processed_delta = post_counts["processed_count"] - pre_counts["processed_count"]
+            invalid_delta = post_counts["invalid_count"] - pre_counts["invalid_count"]
+            total_delta = processed_delta + invalid_delta
+            details = (
+                f"PostgreSQL row-count delta after the controlled sample runtime flow: "
+                f"processed_delta={processed_delta}, invalid_delta={invalid_delta}, total_delta={total_delta}, "
+                f"expected_rows={expected_rows}."
+            )
+            status = "passed" if total_delta == expected_rows and processed_delta >= 0 and invalid_delta >= 0 else "failed"
+            if total_delta != expected_rows:
+                details = (
+                    f"Controlled sample runtime loaded {total_delta} total rows into PostgreSQL, "
+                    f"but expected {expected_rows} rows from the bounded sample dataset."
+                )
+            results.append(
+                make_result(
+                    name="sample_pipeline_verify_postgres_deltas",
+                    status=status,
+                    required=True,
+                    details=details,
+                    metadata={
+                        **context,
+                        "pre_counts": pre_counts,
+                        "post_counts": post_counts,
+                        "processed_delta": processed_delta,
+                        "invalid_delta": invalid_delta,
+                        "total_delta": total_delta,
+                    },
+                )
+            )
+
+    anomaly_result = run_anomaly_detection_check(
+        skip_anomaly_detection=skip_anomaly_detection,
+        max_rows=expected_rows,
+        dry_run=dry_run,
+        check_name="sample_pipeline_anomaly_detection_read_only",
+    )
+    results.append(anomaly_result)
+    return results
 
 
 def run_command(
@@ -675,11 +1229,12 @@ def run_anomaly_detection_check(
     skip_anomaly_detection: bool,
     max_rows: int,
     dry_run: bool,
+    check_name: str = "anomaly_detection_read_only",
 ) -> CheckResult:
     start_time = time.time()
     if skip_anomaly_detection:
         return make_result(
-            name="anomaly_detection_read_only",
+            name=check_name,
             status="skipped",
             required=False,
             details="Skipped because --skip-anomaly-detection was provided.",
@@ -696,7 +1251,7 @@ def run_anomaly_detection_check(
 
     if dry_run:
         return make_result(
-            name="anomaly_detection_read_only",
+            name=check_name,
             status="dry_run",
             required=False,
             details=(
@@ -719,7 +1274,7 @@ def run_anomaly_detection_check(
     combined_text = stderr_text + "\n" + stdout_text
     if result.returncode != 0 and any(hint in combined_text for hint in MISSING_RUNTIME_HINTS):
         return make_result(
-            name="anomaly_detection_read_only",
+            name=check_name,
             status="skipped",
             required=False,
             details=(
@@ -740,7 +1295,7 @@ def run_anomaly_detection_check(
         else "Anomaly detection helper returned a non-zero exit code."
     )
     return make_result(
-        name="anomaly_detection_read_only",
+        name=check_name,
         status=status,
         required=False,
         details=details,
@@ -805,8 +1360,10 @@ def build_output_payload(
         "dataset_path": str(dataset_path),
         "max_rows": args.max_rows,
         "dry_run": args.dry_run,
+        "run_sample_pipeline": args.run_sample_pipeline,
         "safeguards": {
             "starts_full_pipeline": False,
+            "runs_controlled_sample_pipeline_only_when_requested": True,
             "runs_full_dataset_by_default": False,
             "deploys_aws": False,
             "runs_terraform_apply": False,
@@ -894,6 +1451,25 @@ def main() -> int:
                 dry_run=args.dry_run,
             )
         )
+
+        if args.run_sample_pipeline:
+            results.extend(
+                run_controlled_sample_pipeline(
+                    dataset_path=dataset_path,
+                    max_rows=args.max_rows,
+                    dry_run=args.dry_run,
+                    skip_anomaly_detection=args.skip_anomaly_detection,
+                )
+            )
+        else:
+            results.append(
+                make_result(
+                    name="sample_pipeline_runtime",
+                    status="skipped",
+                    required=False,
+                    details="Skipped because --run-sample-pipeline was not provided.",
+                )
+            )
 
         payload = build_output_payload(
             args=args,

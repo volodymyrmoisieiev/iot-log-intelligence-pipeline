@@ -685,15 +685,16 @@ Stage 20E adds the final Stage 20 runbook at [docs/stage-20-ci-quality-gates.md]
 
 For the focused Stage 20 guide and expansion roadmap, see [docs/ci-quality-gates.md](docs/ci-quality-gates.md).
 
-## 21. Stage 21A Local E2E smoke test foundation
+## 21. Stage 21B Local E2E smoke test foundation and controlled sample runtime
 
-Stage 21A adds a safe local smoke-test entry point at `scripts/run_local_e2e_smoke_test.py` plus a focused runbook at [docs/local-e2e-smoke-test.md](docs/local-e2e-smoke-test.md).
+Stage 21B keeps the safe local smoke-test entry point at `scripts/run_local_e2e_smoke_test.py`, extends it with an optional `--run-sample-pipeline` mode, and updates the focused runbook at [docs/local-e2e-smoke-test.md](docs/local-e2e-smoke-test.md).
 
 What this stage provides:
 
 - a standard-library-only smoke-test helper with `sample`, `medium`, and `full` profile selection
 - bounded row inspection through `--max-rows` so repository validation does not scan the full dataset by default
 - JSON result reporting for repository structure, dataset selection, Docker Compose config, Python syntax, Terraform validation, data-contract validation, and optional read-only anomaly detection
+- an optional controlled sample runtime E2E pass that starts required local services, runs producer/consumer/warehouse-loader with matching bounded limits, and verifies PostgreSQL row-count deltas
 - explicit safety rails that avoid starting the full Kafka/PostgreSQL pipeline, avoid AWS deployment, and avoid `terraform apply`
 
 Recommended sample-safe commands:
@@ -701,7 +702,10 @@ Recommended sample-safe commands:
 ```powershell
 .\.venv-observability\Scripts\python.exe .\scripts\run_local_e2e_smoke_test.py --profile sample --max-rows 1000 --dry-run --output-json docs/e2e-smoke-test-local.json
 .\.venv-observability\Scripts\python.exe .\scripts\run_local_e2e_smoke_test.py --profile sample --max-rows 1000 --output-json docs/e2e-smoke-test-local.json
+.\.venv-observability\Scripts\python.exe .\scripts\run_local_e2e_smoke_test.py --profile sample --max-rows 1000 --run-sample-pipeline --output-json docs/e2e-smoke-test-local.json
 ```
+
+Stage 21B still keeps the default flow sample-safe and bounded. Full dataset or `100k` style validation remains future Stage 21C / Stage 21D work rather than the default local behavior here.
 
 ## 22. Stage 9A PySpark batch processing foundation
 
@@ -1193,13 +1197,14 @@ Do not commit real credentials, production secrets, or sensitive data. Use envir
 
 ## 41. Current stage
 
-Stage 21A includes everything from Stage 20E plus:
+Stage 21B includes everything from Stage 21A plus:
 
 - a local smoke-test helper at `scripts/run_local_e2e_smoke_test.py`
 - a focused local smoke-test runbook at `docs/local-e2e-smoke-test.md`
 - bounded JSON-reporting validation for repository structure, Docker Compose config, Python syntax, Terraform validation, data contracts, and optional read-only anomaly detection
+- an optional controlled sample runtime E2E mode with isolated Kafka topics, bounded producer/consumer/loader limits, and PostgreSQL row-count verification
 
-Stage 20E, Stage 20D, Stage 20C, Stage 20B, Stage 20A, Stage 19E, Stage 19D, Stage 19C, Stage 19B, Stage 19A, and Stage 18D foundations remain in place, including:
+Stage 21A, Stage 20E, Stage 20D, Stage 20C, Stage 20B, Stage 20A, Stage 19E, Stage 19D, Stage 19C, Stage 19B, Stage 19A, and Stage 18D foundations remain in place, including:
 
 - repository skeleton and documentation
 - local Docker Compose services for Kafka, Kafka topic initialization, and Kafka UI
@@ -1253,5 +1258,6 @@ Stage 20E, Stage 20D, Stage 20C, Stage 20B, Stage 20A, Stage 19E, Stage 19D, Sta
 - a Stage 18 anomaly detection guide at `docs/anomaly-detection.md`
 - a final Stage 18 runbook at `docs/stage-18-anomaly-detection.md`
 - a local E2E smoke-test helper that ties together safe repository-level checks without running the full dataset or full local pipeline by default
+- an optional controlled sample runtime flow that exercises the producer, consumer, and warehouse loader with visible bounded limits
 
-Airflow now orchestrates the existing local producer, consumer, warehouse loader, anomaly detection step, dbt flow, PySpark device feature engineering step, local Spark output validation, local MinIO upload, and MinIO object validation through one manual DAG that is safer for repeated demo runs and better documented for local development. Spark still runs only in local Docker mode, and MinIO remains a local S3-compatible target only rather than production AWS S3. Stage 12C keeps the Terraform S3 data lake definitions that mirror the local MinIO pattern for future AWS use and adds CI validation for them, but no AWS resources are created until `terraform apply` is run, and neither `terraform plan` nor `terraform apply` is part of CI. Full dbt execution and full Airflow orchestration are still verified locally through Docker Compose or Airflow, while CI remains limited to safe validation checks. Stage 15A adds the dataset profile contract, Stage 15B adds the local preparation script, Stage 15C brings those profiles into the Go producer, Stage 15D makes larger consumer and loader validation runs clearer and safer, Stage 15E carries those settings into the local Airflow DAG and runbook without changing downstream modeling logic, Stage 16A adds the first local benchmark helper for measuring those profile-specific runs, Stage 16B adds human-readable benchmark summary generation on top of the JSON benchmark artifacts, Stage 16C adds benchmark result analysis on top of those local outputs, Stage 16D finalizes the Performance / Load Testing workflow as PR-ready documentation, Stage 17A adds the first formal raw-data contract foundation for stronger future validation, Stage 17B adds local raw-CSV contract validation tooling on top of that foundation, Stage 17C makes that validation a real Airflow pipeline guardrail before producer execution, Stage 18A adds a local rule-based anomaly detection foundation, Stage 18B persists those anomaly results into the warehouse, Stage 18C integrates that anomaly detection into Airflow after warehouse loading, Stage 18D finalizes the documentation and validation story for PR review, and Stage 21A adds a reusable local smoke-test foundation that prepares future fuller dataset validation without changing any existing pipeline runtime logic.
+Airflow now orchestrates the existing local producer, consumer, warehouse loader, anomaly detection step, dbt flow, PySpark device feature engineering step, local Spark output validation, local MinIO upload, and MinIO object validation through one manual DAG that is safer for repeated demo runs and better documented for local development. Spark still runs only in local Docker mode, and MinIO remains a local S3-compatible target only rather than production AWS S3. Stage 12C keeps the Terraform S3 data lake definitions that mirror the local MinIO pattern for future AWS use and adds CI validation for them, but no AWS resources are created until `terraform apply` is run, and neither `terraform plan` nor `terraform apply` is part of CI. Full dbt execution and full Airflow orchestration are still verified locally through Docker Compose or Airflow, while CI remains limited to safe validation checks. Stage 15A adds the dataset profile contract, Stage 15B adds the local preparation script, Stage 15C brings those profiles into the Go producer, Stage 15D makes larger consumer and loader validation runs clearer and safer, Stage 15E carries those settings into the local Airflow DAG and runbook without changing downstream modeling logic, Stage 16A adds the first local benchmark helper for measuring those profile-specific runs, Stage 16B adds human-readable benchmark summary generation on top of the JSON benchmark artifacts, Stage 16C adds benchmark result analysis on top of those local outputs, Stage 16D finalizes the Performance / Load Testing workflow as PR-ready documentation, Stage 17A adds the first formal raw-data contract foundation for stronger future validation, Stage 17B adds local raw-CSV contract validation tooling on top of that foundation, Stage 17C makes that validation a real Airflow pipeline guardrail before producer execution, Stage 18A adds a local rule-based anomaly detection foundation, Stage 18B persists those anomaly results into the warehouse, Stage 18C integrates that anomaly detection into Airflow after warehouse loading, Stage 18D finalizes the documentation and validation story for PR review, Stage 21A adds a reusable local smoke-test foundation that prepares future fuller dataset validation without changing any existing pipeline runtime logic, and Stage 21B extends that entry point with a controlled sample runtime E2E pass while leaving full or `100k` scale validation for later Stage 21C / Stage 21D work.
