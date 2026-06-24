@@ -171,6 +171,21 @@ It also records the effective progress configuration for the controlled runtime 
 - `warehouse_loader.batch_size`
 - Python progress mode as `tqdm_if_tty_else_log`
 
+Validated Stage 22C full `100000`-row result:
+
+- available rows: `100000`
+- expected rows: `100000`
+- processed delta: `100000`
+- invalid delta: `0`
+- total delta: `100000`
+- producer duration: `158.816s`
+- consumer duration: `34.504s`
+- warehouse loader duration: `15.279s`
+- data contract validation duration: `1.589s`
+- anomaly detection duration: `1.654s`
+- `WAREHOUSE_LOADER_BATCH_SIZE`: `1000`
+- progress intervals: producer `1000`, consumer `1000`, warehouse loader `1000`
+
 Expected runtime note:
 
 - a `100000`-row run can take noticeably longer than sample or medium validation
@@ -180,6 +195,12 @@ Expected runtime note:
 - `WAREHOUSE_LOADER_BATCH_SIZE` defaults to `1000` for the controlled runtime flow so medium and full runs can compare loader timing more meaningfully
 - Stage 22B adds batch insert optimization on top of the Stage 22A progress visibility foundation
 
+Known before and after warehouse-loader comparison for the full `100000`-row path:
+
+- Stage 21 baseline warehouse loader: `758.764s`
+- Stage 22C post-optimization warehouse loader: `15.279s`
+- correctness stayed intact with `processed_delta=100000` and `invalid_delta=0`
+
 ## Comparing Before And After Runtime
 
 To compare warehouse-loader behavior before and after this optimization:
@@ -187,6 +208,8 @@ To compare warehouse-loader behavior before and after this optimization:
 - run the same `medium` or `full` command with the same `--max-rows`
 - compare `stage_durations_seconds.warehouse_loader` in the generated JSON summaries
 - keep `WAREHOUSE_LOADER_BATCH_SIZE` fixed first, then vary it intentionally if you want to test different tradeoffs
+
+Remember that the generated JSON summary is a local validation artifact only. `docs/e2e-smoke-test-local.json` is intentionally ignored by Git and should not be committed.
 
 ## Why `full` Is Not the Default
 
