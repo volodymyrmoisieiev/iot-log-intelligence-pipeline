@@ -7,6 +7,7 @@ There are now three related local validation modes:
 - `dry-run` checks which smoke-test commands would execute and writes that plan into the JSON summary without running the external command steps
 - the default smoke test validates repository structure, selected dataset availability, Docker Compose config, Python syntax, Terraform validation, data-contract validation, and optional read-only anomaly detection without starting the full local pipeline
 - `--run-profile-pipeline` adds a controlled profile-specific runtime E2E pass that starts only the required local services, uses bounded row/message limits, and verifies PostgreSQL row-count deltas after producer, consumer, and warehouse-loader execution
+- `--stream-output` switches manual runtime runs from captured/report mode to live terminal streaming so progress logs or `tqdm` can be seen directly
 
 `--run-sample-pipeline` is still supported as a backward-compatible alias for `--profile sample --run-profile-pipeline`.
 
@@ -69,6 +70,8 @@ Useful optional flags:
 - `--skip-dbt`
 - `--skip-anomaly-detection`
 - `--skip-terraform`
+- `--stream-output`
+- `--progress-mode auto|log|tqdm`
 
 ## Controlled Sample Runtime E2E Example
 
@@ -96,6 +99,36 @@ How progress is displayed in this mode:
 - when `tqdm` is unavailable or output is being captured, the Python components fall back to regular interval-based log lines
 - the JSON summary records the effective per-component progress intervals under `profile_pipeline_progress`
 - the warehouse-loader entry in that summary now also records the effective `batch_size`
+
+Why `tqdm` is hidden in captured mode:
+
+- the local E2E helper normally captures subprocess stdout and stderr so it can write JSON excerpts
+- once output is captured instead of attached to your terminal, `tqdm` no longer behaves like a live interactive progress bar
+- the Python components then fall back to interval-based logs in `auto` mode
+
+When you want live manual progress:
+
+- add `--stream-output` so producer, consumer, and loader output is sent directly to your terminal
+- use `--progress-mode tqdm` if you want to force `tqdm` for the Python components during that manual run
+- use `--progress-mode log` if you want plain interval-based logs even in a real terminal
+
+Captured/report mode example:
+
+```powershell
+.\.venv-observability\Scripts\python.exe .\scripts\run_local_e2e_smoke_test.py --profile full --max-rows 100000 --run-profile-pipeline --allow-full-run --output-json docs/e2e-smoke-test-local.json
+```
+
+Live manual progress mode example:
+
+```powershell
+.\.venv-observability\Scripts\python.exe .\scripts\run_local_e2e_smoke_test.py --profile full --max-rows 100000 --run-profile-pipeline --allow-full-run --stream-output --progress-mode tqdm --output-json docs/e2e-smoke-test-local.json
+```
+
+Progress mode guidance:
+
+- `auto` keeps the current safe default and behaves like `tqdm_if_tty_else_log`
+- `log` is useful when you want stable line-based output in terminals, shell transcripts, or copy-paste-friendly reviews
+- `tqdm` is useful for manual observation when your terminal can render the live bar and you want the clearest visual feedback
 
 This still does not run `terraform apply`, deploy AWS resources, or switch the repository to a full-dataset validation path.
 

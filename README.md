@@ -1209,6 +1209,7 @@ Stage 22D includes everything from Stage 22C plus:
 - a final Stage 22 runbook at [docs/stage-22-progress-and-loader-optimization.md](docs/stage-22-progress-and-loader-optimization.md)
 - one consolidated explanation of producer, consumer, loader, JSON-summary progress visibility, optional `tqdm`, batch size controls, and full-benchmark results
 - PR-ready cleanup guidance for local JSON reports, large datasets, Terraform local state, and runtime logs
+- a manual live-output mode for local E2E runs so progress logs or `tqdm` can be observed directly in the terminal without changing the default captured/report behavior
 
 Stage 22C includes everything from Stage 22B plus:
 

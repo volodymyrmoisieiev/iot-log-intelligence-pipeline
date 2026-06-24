@@ -20,6 +20,8 @@ Before Stage 22A, longer `medium`, `full`, or `100000`-row validation runs could
 
 Stage 22A fixes that by adding visible progress signals across producer, consumer, loader, and the local E2E summary. That visibility also made the warehouse-loader bottleneck much easier to confirm before Stage 22B optimization work.
 
+One nuance from Stage 22A is that the local E2E helper normally captures subprocess stdout and stderr so it can keep JSON excerpts. That preserved machine-readable reporting, but it also meant `tqdm` was not visible as a live terminal progress bar during manual E2E runs. The Stage 22 live-output follow-up adds an explicit manual `--stream-output` mode for those cases.
+
 ## How Progress Is Shown
 
 ### Go producer
@@ -54,6 +56,11 @@ The local E2E helper records runtime stage durations plus the effective progress
 - warehouse-loader batch size
 - Python progress mode as `tqdm_if_tty_else_log`
 
+Stage 22 also supports two manual-observation controls in the local E2E helper:
+
+- `--stream-output` streams subprocess stdout and stderr directly to the terminal instead of fully capturing them
+- `--progress-mode auto|log|tqdm` controls how the Python consumer and warehouse loader choose between progress bars and interval logs
+
 ## What `tqdm` Does
 
 `tqdm` is an optional terminal progress-bar library used only by the Python consumer and warehouse loader.
@@ -68,6 +75,12 @@ Fallback behavior:
 - if `tqdm` is not installed, the components still work
 - if output is being captured instead of shown on a terminal, the components fall back to plain interval-based log lines
 - CI-friendly and `py_compile`-safe behavior is preserved because the import is optional and handled safely
+
+Mode behavior:
+
+- `auto` means use `tqdm` only when output is attached to a real terminal, otherwise use logs
+- `log` means always use interval-based logging
+- `tqdm` means try to render `tqdm` even when normal TTY detection would have chosen logs, with safe fallback to logs if `tqdm` is unavailable
 
 ## Progress And Batch Controls
 
@@ -92,6 +105,13 @@ Fallback behavior:
 - controls how many buffered records the warehouse loader writes in one batch on the normal path
 - the same setting also determines how often Kafka offsets are committed in batches on that path
 - default: `1000`
+
+### Manual live-output controls
+
+- `--stream-output` is useful for manual testing when you want to watch progress live instead of relying on captured JSON excerpts
+- `--progress-mode log` is useful when you want predictable line-based output
+- `--progress-mode tqdm` is useful when you want the clearest live terminal feedback during manual E2E runs
+- when `--stream-output` is not used, the original captured/report behavior stays unchanged
 
 ## Why Batching Improved Performance
 
@@ -182,6 +202,20 @@ Generated artifacts remain local-only and should not be committed:
 - ad hoc runtime logs and other local runtime artifacts
 
 The JSON report is intentionally ignored by Git and is meant for local inspection only.
+
+Examples:
+
+Captured/report mode:
+
+```powershell
+.\.venv-observability\Scripts\python.exe .\scripts\run_local_e2e_smoke_test.py --profile full --max-rows 100000 --run-profile-pipeline --allow-full-run --output-json docs/e2e-smoke-test-local.json
+```
+
+Live manual progress mode:
+
+```powershell
+.\.venv-observability\Scripts\python.exe .\scripts\run_local_e2e_smoke_test.py --profile full --max-rows 100000 --run-profile-pipeline --allow-full-run --stream-output --progress-mode tqdm --output-json docs/e2e-smoke-test-local.json
+```
 
 ## Limitations And Future Improvements
 
