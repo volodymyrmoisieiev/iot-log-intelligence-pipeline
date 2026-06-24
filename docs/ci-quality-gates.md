@@ -2,7 +2,7 @@
 
 ## What Stage 20 adds
 
-Stage 20 starts the repository's GitHub Actions quality-gate path. Stage 20A introduces a safe, fast CI foundation that runs on pull requests targeting `develop` and `main`, plus direct pushes to those branches. Stage 20B adds a separate Terraform validation workflow for the AWS orchestration foundation under `infra/aws-orchestration/`.
+Stage 20 starts the repository's GitHub Actions quality-gate path. Stage 20A introduces a safe, fast CI foundation that runs on pull requests targeting `develop` and `main`, plus direct pushes to those branches. Stage 20B adds a separate Terraform validation workflow for the AWS orchestration foundation under `infra/aws-orchestration/`. Stage 20C adds a dedicated Python and Airflow validation workflow for lightweight syntax and DAG checks.
 
 This stage is intentionally conservative. It gives the project a repeatable automated checkpoint for structural problems and obvious syntax regressions without trying to run the full local platform inside GitHub-hosted runners.
 
@@ -94,12 +94,64 @@ That matters because it keeps the workflow safe for pull requests:
 
 Combined with `terraform fmt -check` and `terraform validate`, this gives useful configuration feedback while staying cost-safe and credentials-free.
 
+## What runs in Stage 20C
+
+Stage 20C adds a dedicated workflow at `.github/workflows/python-airflow-validate.yml`.
+
+This workflow runs on pull requests targeting `develop` and `main`, plus direct pushes to those branches, and uses path filters aimed at Python-relevant areas such as:
+
+- `scripts/**`
+- `airflow/**`
+- `aws/lambda/**`
+- `observability/**`
+- the workflow file itself
+
+The workflow performs these checks:
+
+- repository checkout
+- Python 3.11 setup
+- `py_compile` validation for important Python entry points when they exist:
+  - `scripts/run_anomaly_detection.py`
+  - `scripts/validate_data_contract.py`
+  - `scripts/run_performance_benchmark.py`
+  - `scripts/analyze_performance_results.py`
+  - `scripts/create_dataset_profile.py`
+  - `aws/lambda/iot_metadata_validator/handler.py`
+  - `observability/write_pipeline_observability.py`
+- `py_compile` validation for Python DAG files under `airflow/dags/`
+- a lightweight listing of detected DAG Python files for easier debugging
+
+If a planned or future file is not present, the workflow skips it rather than failing only because the repository layout evolved.
+
+## Why Python and Airflow validation is separate
+
+Python utility scripts and Airflow DAG files change for different reasons than Terraform or repository-structure updates, so Stage 20C keeps them in their own quality gate.
+
+That separation keeps the workflow:
+
+- lightweight
+- easy to troubleshoot
+- focused on syntax and DAG safety
+- independent from infrastructure validation
+
+## What Stage 20C intentionally does not execute
+
+To keep this workflow safe and fast, Stage 20C does not:
+
+- start Kafka, PostgreSQL, Spark, or MinIO
+- run the full local Airflow pipeline
+- trigger DAG runs
+- require AWS credentials or repository secrets
+- execute the full dataset
+- perform full Airflow runtime integration checks inside GitHub Actions
+
+For now, Airflow validation in CI is intentionally limited to DAG Python syntax checks and DAG-file discovery. Full Airflow CLI or runtime validation remains better suited to local manual verification through the existing Docker Compose Airflow setup.
+
 ## Planned Stage 20 expansion
 
 The Stage 20 roadmap is intentionally incremental:
 
-- Stage 20C: add targeted language-level test and lint quality gates
-- Stage 20D: add deeper dbt, Airflow, and orchestration validation in modular workflows
+- Stage 20D: add targeted language-level tests plus deeper dbt and orchestration validation in modular workflows
 - Stage 20E: add stricter container smoke checks and release-oriented safeguards for deployment readiness and branch protection support
 
 Each follow-up stage should stay explicit about runtime cost, credential requirements, and what is safe to execute on GitHub-hosted runners.

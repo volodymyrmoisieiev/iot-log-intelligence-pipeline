@@ -1,0 +1,102 @@
+name: Python and Airflow Validate
+
+on:
+  pull_request:
+    branches:
+      - develop
+      - main
+    paths:
+      - ".github/workflows/python-airflow-validate.yml"
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+      - "scripts/**"
+      - "airflow/**"
+      - "aws/lambda/**"
+      - "observability/**"
+  push:
+    branches:
+      - develop
+      - main
+    paths:
+      - ".github/workflows/python-airflow-validate.yml"
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+      - "scripts/**"
+      - "airflow/**"
+      - "aws/lambda/**"
+      - "observability/**"
+
+permissions:
+  contents: read
+
+jobs:
+  python-airflow-validate:
+    name: Python Syntax and Airflow DAG Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Compile Python entry points
+        shell: bash
+        run: |
+          python_files=(
+            "scripts/run_anomaly_detection.py"
+            "scripts/validate_data_contract.py"
+            "scripts/run_performance_benchmark.py"
+            "scripts/analyze_performance_results.py"
+            "scripts/create_dataset_profile.py"
+            "aws/lambda/iot_metadata_validator/handler.py"
+            "observability/write_pipeline_observability.py"
+          )
+
+          compiled_any=0
+
+          for file in "${python_files[@]}"; do
+            if [[ -f "$file" ]]; then
+              echo "Compiling $file"
+              python -m py_compile "$file"
+              compiled_any=1
+            else
+              echo "Skipping missing file: $file"
+            fi
+          done
+
+          if [[ "$compiled_any" -eq 0 ]]; then
+            echo "::warning title=No Python entry points compiled::No expected Python entry points were present."
+          fi
+
+      - name: Compile Airflow DAG files
+        shell: bash
+        run: |
+          shopt -s nullglob
+          dag_files=(airflow/dags/*.py)
+
+          if [[ "${#dag_files[@]}" -eq 0 ]]; then
+            echo "::warning title=No DAG files found::No Python DAG files were found under airflow/dags."
+            exit 0
+          fi
+
+          for file in "${dag_files[@]}"; do
+            echo "Compiling DAG $file"
+            python -m py_compile "$file"
+          done
+
+      - name: List Airflow DAG Python files
+        shell: bash
+        run: |
+          shopt -s nullglob
+          dag_files=(airflow/dags/*.py)
+
+          if [[ "${#dag_files[@]}" -eq 0 ]]; then
+            echo "No DAG Python files to list."
+            exit 0
+          fi
+
+          printf '%s\n' "${dag_files[@]}"
