@@ -1,8 +1,10 @@
 # Stage 20 CI Quality Gates
 
+See also: [Final Stage 20 runbook](stage-20-ci-quality-gates.md)
+
 ## What Stage 20 adds
 
-Stage 20 starts the repository's GitHub Actions quality-gate path. Stage 20A introduces a safe, fast CI foundation that runs on pull requests targeting `develop` and `main`, plus direct pushes to those branches. Stage 20B adds a separate Terraform validation workflow for the AWS orchestration foundation under `infra/aws-orchestration/`. Stage 20C adds a dedicated Python and Airflow validation workflow for lightweight syntax and DAG checks. Stage 20D adds pull request and release-process guidance plus visible CI quality indicators in the README.
+Stage 20 starts the repository's GitHub Actions quality-gate path. Stage 20A introduces a safe, fast CI foundation that runs on pull requests targeting `develop` and `main`, plus direct pushes to those branches. Stage 20B adds a separate Terraform validation workflow for the AWS orchestration foundation under `infra/aws-orchestration/`. Stage 20C adds a dedicated Python and Airflow validation workflow for lightweight syntax and DAG checks. Stage 20D adds pull request and release-process guidance plus visible CI quality indicators in the README. Stage 20E finalizes the documentation and PR-ready cleanup story for the whole quality-gate foundation.
 
 This stage is intentionally conservative. It gives the project a repeatable automated checkpoint for structural problems and obvious syntax regressions without trying to run the full local platform inside GitHub-hosted runners.
 
@@ -181,17 +183,22 @@ Stage 20D does not:
 
 ## What comes next in Stage 20E
 
-Stage 20E is planned to build on the process foundation from 20D with deeper release-readiness and validation coverage, such as:
+Stage 20E finalizes the Stage 20 documentation set with:
 
-- broader language-level test automation
-- richer dbt or orchestration validation where cost-safe
-- stricter smoke-check guidance for higher-confidence merge readiness
-- more explicit release guardrails as the repository moves closer to a fuller CI/CD story
+- a focused runbook at `docs/stage-20-ci-quality-gates.md`
+- clearer links between the README, CI quality-gate guide, and release checklist
+- PR-ready cleanup guidance so the branch is easier to review before merge
+
+Stage 20E keeps runtime logic untouched and focuses on making the Stage 20 work easier to review, explain, and merge confidently.
 
 ## Planned Stage 20 expansion
 
-The Stage 20 roadmap is intentionally incremental:
+Stage 20 is now documented as a complete first-pass quality-gate foundation. Natural future follow-ups after Stage 20 include:
 
-- Stage 20E: add deeper release-readiness, testing, and higher-confidence validation guardrails on top of the current quality-gate foundation
+- dbt CI checks
+- data contract CI checks
+- a local end-to-end smoke-test workflow
+- GitHub Actions artifacts for validation evidence
+- an optional AWS plan workflow with explicit safety controls
 
 Each follow-up stage should stay explicit about runtime cost, credential requirements, and what is safe to execute on GitHub-hosted runners.

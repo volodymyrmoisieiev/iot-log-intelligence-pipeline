@@ -4,6 +4,8 @@
 
 This checklist keeps the repository's merge and release flow consistent, reviewable, and clean as the CI quality-gate story grows.
 
+For the complete Stage 20 quality-gates runbook, see [stage-20-ci-quality-gates.md](stage-20-ci-quality-gates.md).
+
 ## Expected branch flow
 
 - create and iterate on a `feature/*` branch
@@ -18,6 +20,7 @@ This checklist keeps the repository's merge and release flow consistent, reviewa
 - verify the local working tree is clean before final branch cleanup
 - confirm no generated artifacts, local caches, or secrets are included
 - update documentation when project behavior, validation flow, or release expectations changed
+- review the Stage 20 runbook when validation expectations or CI scope are unclear
 
 ## After merge cleanup
 
