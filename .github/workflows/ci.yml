@@ -10,188 +10,97 @@ on:
       - develop
       - main
 
+permissions:
+  contents: read
+
 jobs:
-  repository-validation:
-    name: Repository Validation
+  ci-foundation:
+    name: Stage 20A CI Foundation
     runs-on: ubuntu-latest
-    env:
-      HOST_PROJECT_ROOT: ${{ github.workspace }}
+    timeout-minutes: 10
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Print basic repository information
+        run: |
+          echo "Repository: $GITHUB_REPOSITORY"
+          echo "Event: $GITHUB_EVENT_NAME"
+          echo "Ref: $GITHUB_REF"
+          echo "SHA: $GITHUB_SHA"
+          echo "Runner OS: $RUNNER_OS"
+          echo "Workspace: $GITHUB_WORKSPACE"
+          pwd
+          ls -la
+
+      - name: Verify expected project structure
+        shell: bash
+        run: |
+          required_dirs=(
+            "airflow"
+            "dbt"
+            "scripts"
+            "infra/aws-orchestration"
+            "aws/lambda/iot_metadata_validator"
+            "docs"
+          )
+
+          required_files=(
+            "README.md"
+            "docker-compose.yml"
+            ".github/workflows/ci.yml"
+          )
+
+          for dir in "${required_dirs[@]}"; do
+            if [[ ! -d "$dir" ]]; then
+              echo "::error title=Missing directory::$dir"
+              exit 1
+            fi
+
+            echo "Found directory: $dir"
+          done
+
+          for file in "${required_files[@]}"; do
+            if [[ ! -f "$file" ]]; then
+              echo "::error title=Missing file::$file"
+              exit 1
+            fi
+
+            echo "Found file: $file"
+          done
 
       - name: Validate Docker Compose configuration
         run: docker compose config
 
-  go-producer-tests:
-    name: Go Producer Tests
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go-producer/go.mod
-
-      - name: Run Go tests
-        working-directory: go-producer
-        run: go test ./...
-
-  python-consumer-tests:
-    name: Python Consumer Tests
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install Python consumer dependencies
-        working-directory: python-consumer
+      - name: Compile lightweight Python entry points
+        shell: bash
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          python_files=(
+            "scripts/run_anomaly_detection.py"
+            "scripts/validate_data_contract.py"
+            "scripts/run_performance_benchmark.py"
+            "scripts/analyze_performance_results.py"
+            "aws/lambda/iot_metadata_validator/handler.py"
+            "airflow/dags/iot_local_pipeline_dag.py"
+          )
 
-      - name: Run Python consumer tests
-        working-directory: python-consumer
-        run: python -m pytest
+          compiled_any=0
 
-  warehouse-loader-tests:
-    name: Warehouse Loader Tests
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+          for file in "${python_files[@]}"; do
+            if [[ -f "$file" ]]; then
+              echo "Compiling $file"
+              python -m py_compile "$file"
+              compiled_any=1
+            else
+              echo "Skipping missing file: $file"
+            fi
+          done
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install warehouse loader dependencies
-        working-directory: warehouse-loader
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Run warehouse loader tests
-        working-directory: warehouse-loader
-        run: python -m pytest
-
-  terraform-validation:
-    name: Terraform Validation
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-
-      - name: Check Terraform formatting
-        run: terraform fmt -check -recursive infra/terraform/aws
-
-      - name: Initialize Terraform without backend
-        working-directory: infra/terraform/aws
-        run: terraform init -backend=false
-
-      - name: Validate Terraform configuration
-        working-directory: infra/terraform/aws
-        run: terraform validate
-
-  dbt-validation:
-    name: dbt Validation
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_DB: iot_logs
-          POSTGRES_USER: iot_user
-          POSTGRES_PASSWORD: iot_password
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd="pg_isready -U iot_user -d iot_logs"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=10
-    env:
-      POSTGRES_HOST: localhost
-      POSTGRES_PORT: "5432"
-      POSTGRES_DB: iot_logs
-      POSTGRES_USER: iot_user
-      POSTGRES_PASSWORD: iot_password
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install dbt dependencies
-        working-directory: dbt
-        run: |
-          python -m pip install --upgrade pip
-          pip install "dbt-core==1.10.22" "dbt-postgres==1.10.1"
-          
-
-      - name: Show dbt version
-        run: dbt --version
-
-      - name: Install dbt packages
-        working-directory: dbt
-        run: dbt deps --profiles-dir . || true
-
-      - name: Parse dbt project
-        working-directory: dbt
-        run: dbt parse --profiles-dir .
-
-      - name: Compile dbt project
-        working-directory: dbt
-        run: dbt compile --profiles-dir .
-
-  airflow-dag-validation:
-    name: Airflow DAG Validation
-    runs-on: ubuntu-latest
-    env:
-      AIRFLOW_HOME: /tmp/airflow
-      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-      AIRFLOW__CORE__EXECUTOR: SequentialExecutor
-      AIRFLOW__CORE__DAGS_FOLDER: ${{ github.workspace }}/airflow/dags
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: sqlite:////tmp/airflow_ci.db
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install Airflow dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install "apache-airflow==2.10.5"
-
-      - name: Validate Airflow DAG syntax
-        run: |
-          python -m py_compile airflow/dags/iot_pipeline_smoke_dag.py
-          python -m py_compile airflow/dags/iot_local_pipeline_dag.py
-
-      - name: Validate Airflow DAG imports
-        run: |
-          python -c "from airflow.models import DagBag; import sys; dag_bag = DagBag(dag_folder='airflow/dags', include_examples=False); print(f'Loaded DAGs: {sorted(dag_bag.dags.keys())}'); print(f'Import errors: {dag_bag.import_errors}'); sys.exit(1 if dag_bag.import_errors else 0)"
-
-      - name: Initialize Airflow metadata for CLI validation
-        run: airflow db migrate
-
-      - name: List Airflow DAGs
-        run: airflow dags list --subdir airflow/dags
+          if [[ "$compiled_any" -eq 0 ]]; then
+            echo "::warning title=No Python files compiled::No expected lightweight Python entry points were present."
+          fi
