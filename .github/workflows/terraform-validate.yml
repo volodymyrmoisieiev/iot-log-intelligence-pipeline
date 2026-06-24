@@ -1,0 +1,50 @@
+name: Terraform Validate
+
+on:
+  pull_request:
+    branches:
+      - develop
+      - main
+    paths:
+      - "infra/aws-orchestration/**"
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+  push:
+    branches:
+      - develop
+      - main
+    paths:
+      - "infra/aws-orchestration/**"
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+
+permissions:
+  contents: read
+
+jobs:
+  terraform-validate:
+    name: AWS Orchestration Terraform Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TF_IN_AUTOMATION: "true"
+      TF_INPUT: "false"
+      TERRAFORM_WORKING_DIRECTORY: infra/aws-orchestration
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Check Terraform formatting
+        working-directory: ${{ env.TERRAFORM_WORKING_DIRECTORY }}
+        run: terraform fmt -check
+
+      - name: Initialize Terraform without backend
+        working-directory: ${{ env.TERRAFORM_WORKING_DIRECTORY }}
+        run: terraform init -backend=false
+
+      - name: Validate Terraform configuration
+        working-directory: ${{ env.TERRAFORM_WORKING_DIRECTORY }}
+        run: terraform validate

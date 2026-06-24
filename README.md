@@ -4,7 +4,7 @@
 
 IoT Log Intelligence Pipeline is a portfolio project focused on end-to-end data engineering for IoT logs: ingestion, processing, storage, transformation, and analytics.
 
-The repository is currently at Stage 20A, with a working local Kafka stack, a Go producer, a Python consumer validation layer, a local PostgreSQL warehouse foundation, a warehouse loader service, dbt staging models, dbt analytics marts on top of PostgreSQL, an optional Snowflake-ready dbt target for future cloud warehouse integration, a polished Streamlit dashboard for local analytics, a Streamlit observability monitoring section, safer repeatable local Apache Airflow orchestration for the existing pipeline steps, a fast Stage 20A GitHub Actions CI foundation for repository structure, Docker Compose validation, and lightweight Python syntax checks on pull requests and pushes to `develop` and `main`, a local PySpark batch-processing foundation with a device-level feature engineering job that runs inside the local Airflow pipeline, a local MinIO-based S3-compatible object storage foundation, a local uploader that sends Spark device-feature Parquet output into MinIO, Airflow integration that uploads and validates those MinIO objects as part of the local DAG, an AWS-ready Terraform foundation, Terraform S3 data lake definitions for future AWS storage, an AWS cloud orchestration Terraform foundation for future Lambda, Step Functions, CloudWatch, IAM, and S3-integrated control-plane work, a local AWS Lambda metadata-validation foundation for cloud-side file intake, a Step Functions orchestration foundation for validation-first AWS workflow design, a CloudWatch monitoring and alarms foundation for orchestration observability, and a final Stage 19 AWS orchestration runbook for PR-ready cloud-foundation documentation, alongside the existing observability schema foundation for pipeline audit history, quality checks, and alerts, a local observability writer that persists warehouse-derived metrics into those audit tables, can optionally publish alert events to Kafka, runs near the end of the local Airflow DAG, dataset profile support that now extends through producer, consumer, loader, and the local Airflow runbook for `sample`, `medium`, and `full` style validation runs, a local performance benchmark foundation for benchmark execution, Markdown summary generation, and bottleneck-focused analysis, a Stage 17 data contract foundation, local CSV validation tooling, an Airflow pre-check for the raw IoT log schema, and a Stage 18 anomaly detection foundation with a standalone script, warehouse persistence, Airflow integration, and final PR-ready documentation.
+The repository is currently at Stage 20B, with a working local Kafka stack, a Go producer, a Python consumer validation layer, a local PostgreSQL warehouse foundation, a warehouse loader service, dbt staging models, dbt analytics marts on top of PostgreSQL, an optional Snowflake-ready dbt target for future cloud warehouse integration, a polished Streamlit dashboard for local analytics, a Streamlit observability monitoring section, safer repeatable local Apache Airflow orchestration for the existing pipeline steps, a fast Stage 20A GitHub Actions CI foundation for repository structure, Docker Compose validation, and lightweight Python syntax checks on pull requests and pushes to `develop` and `main`, a dedicated Stage 20B Terraform validation GitHub Actions workflow for the AWS orchestration foundation under `infra/aws-orchestration/`, a local PySpark batch-processing foundation with a device-level feature engineering job that runs inside the local Airflow pipeline, a local MinIO-based S3-compatible object storage foundation, a local uploader that sends Spark device-feature Parquet output into MinIO, Airflow integration that uploads and validates those MinIO objects as part of the local DAG, an AWS-ready Terraform foundation, Terraform S3 data lake definitions for future AWS storage, an AWS cloud orchestration Terraform foundation for future Lambda, Step Functions, CloudWatch, IAM, and S3-integrated control-plane work, a local AWS Lambda metadata-validation foundation for cloud-side file intake, a Step Functions orchestration foundation for validation-first AWS workflow design, a CloudWatch monitoring and alarms foundation for orchestration observability, and a final Stage 19 AWS orchestration runbook for PR-ready cloud-foundation documentation, alongside the existing observability schema foundation for pipeline audit history, quality checks, and alerts, a local observability writer that persists warehouse-derived metrics into those audit tables, can optionally publish alert events to Kafka, runs near the end of the local Airflow DAG, dataset profile support that now extends through producer, consumer, loader, and the local Airflow runbook for `sample`, `medium`, and `full` style validation runs, a local performance benchmark foundation for benchmark execution, Markdown summary generation, and bottleneck-focused analysis, a Stage 17 data contract foundation, local CSV validation tooling, an Airflow pre-check for the raw IoT log schema, and a Stage 18 anomaly detection foundation with a standalone script, warehouse persistence, Airflow integration, and final PR-ready documentation.
 
 ## 2. Planned local architecture
 
@@ -138,10 +138,10 @@ iot-log-intelligence-pipeline/
 - Stage 18: anomaly detection / suspicious traffic detection
 - Stage 19: AWS cloud orchestration foundation
 - Stage 20A: CI foundation quality gates
-- Stage 20B: language tests and linting in CI
-- Stage 20C: infrastructure, dbt, and orchestration validation in CI
-- Stage 20D: container and integration smoke checks
-- Stage 20E: release and deployment safeguards
+- Stage 20B: dedicated Terraform validation workflow
+- Stage 20C: language tests and linting in CI
+- Stage 20D: dbt and orchestration validation in CI
+- Stage 20E: container smoke checks and release safeguards
 
 ## 7. Stage 1 local setup
 
@@ -629,11 +629,11 @@ What Stage 7C does not do:
 - it does not start the Streamlit dashboard
 - it does not add any cloud or production orchestration
 
-## 21. Stage 20A CI Foundation with GitHub Actions
+## 21. Stage 20A-20B CI Quality Gates with GitHub Actions
 
-GitHub Actions now provides a fast Stage 20A quality-gate workflow for pull requests targeting `develop` and `main`, plus direct pushes to those branches.
+GitHub Actions now provides separate Stage 20 quality gates for pull requests targeting `develop` and `main`, plus direct pushes to those branches.
 
-The current CI scope is intentionally small and focused on safe early validation:
+Stage 20A remains the fast repository-level foundation workflow in `.github/workflows/ci.yml`. Its scope is intentionally small and focused on safe early validation:
 
 - check out the repository
 - print basic repository metadata for debugging
@@ -641,11 +641,19 @@ The current CI scope is intentionally small and focused on safe early validation
 - validate the Docker Compose configuration with `docker compose config`
 - compile selected lightweight Python entry points with `py_compile` when those files exist
 
-This workflow is designed to catch obvious structural and syntax regressions without requiring secrets, AWS credentials, heavy service startup, or full pipeline execution.
+Stage 20B adds a dedicated Terraform workflow in `.github/workflows/terraform-validate.yml` for `infra/aws-orchestration/`. That workflow:
 
-Stage 20A intentionally does not run Go tests, Python service tests, dbt parsing/compilation, Airflow service validation, Terraform validation, Kafka/PostgreSQL integration, Spark or MinIO jobs, or any deployment activity yet. Those deeper checks are planned to return in later Stage 20 follow-up phases once they are split into clearer, cost-safe workflows.
+- checks Terraform formatting with `terraform fmt -check`
+- initializes Terraform with `terraform init -backend=false`
+- validates configuration with `terraform validate`
 
-For the focused Stage 20A guide and expansion roadmap, see [docs/ci-quality-gates.md](docs/ci-quality-gates.md).
+`terraform init -backend=false` keeps the workflow safe for CI because it avoids backend connectivity, remote state access, AWS credentials, and any deployment behavior while still letting Terraform validate configuration structure.
+
+Together, Stage 20A and Stage 20B catch repository-level regressions and Terraform configuration issues without starting the full local platform or creating cloud resources.
+
+Stage 20C is planned to add language-level tests and linting in separate modular workflows, followed later by broader dbt, orchestration, and smoke-check coverage.
+
+For the focused Stage 20 guide and expansion roadmap, see [docs/ci-quality-gates.md](docs/ci-quality-gates.md).
 
 ## 22. Stage 9A PySpark batch processing foundation
 
@@ -1137,13 +1145,13 @@ Do not commit real credentials, production secrets, or sensitive data. Use envir
 
 ## 41. Current stage
 
-Stage 20A includes everything from Stage 19E plus:
+Stage 20B includes everything from Stage 20A plus:
 
-- a fast GitHub Actions CI foundation at `.github/workflows/ci.yml` for repository structure checks, `docker compose config`, and lightweight Python syntax validation
-- a focused Stage 20 guide at `docs/ci-quality-gates.md`
-- PR-friendly quality gates for `develop` and `main` that do not require AWS credentials, secrets, or full platform startup
+- a dedicated Terraform validation workflow at `.github/workflows/terraform-validate.yml` for `infra/aws-orchestration/`
+- separated infrastructure validation from the base CI foundation
+- cost-safe Terraform checks using `terraform fmt -check`, `terraform init -backend=false`, and `terraform validate`
 
-Stage 19E, Stage 19D, Stage 19C, Stage 19B, Stage 19A, and Stage 18D foundations remain in place, including:
+Stage 20A, Stage 19E, Stage 19D, Stage 19C, Stage 19B, Stage 19A, and Stage 18D foundations remain in place, including:
 
 - repository skeleton and documentation
 - local Docker Compose services for Kafka, Kafka topic initialization, and Kafka UI
@@ -1156,6 +1164,7 @@ Stage 19E, Stage 19D, Stage 19C, Stage 19B, Stage 19A, and Stage 18D foundations
 - a polished Streamlit dashboard with KPI cards, filters, charts, mart tables, and portfolio-ready UX guidance
 - a local Apache Airflow foundation with a separate metadata database, webserver, scheduler, smoke DAG, safer repeatable local orchestration DAG, and polished local documentation
 - a fast GitHub Actions CI foundation for repository structure validation, Docker Compose validation, and lightweight Python syntax checks on `develop` and `main`
+- a dedicated GitHub Actions Terraform validation workflow for `infra/aws-orchestration/` that runs without AWS credentials or backend state access
 - a local PySpark batch-processing foundation with a dedicated `spark-batch` Docker Compose service and a simple smoke job
 - a local PySpark device feature engineering job that reads `data/samples/sample_iot_logs.csv` and writes Parquet output to `data/processed/spark/device_features`
 - integration of that PySpark device feature job into `iot_local_pipeline_dag` through `run_spark_device_features`
