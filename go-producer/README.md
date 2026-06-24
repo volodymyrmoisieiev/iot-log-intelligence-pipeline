@@ -13,6 +13,7 @@ By default it still uses the tracked sample dataset:
 - `DATASET_PROFILE` - dataset mode, allowed values `sample`, `medium`, `full`, default `sample`
 - `PRODUCER_INPUT_FILE` - optional explicit CSV input path override; if set, it overrides `DATASET_PROFILE`
 - `PRODUCER_MAX_ROWS` - optional positive row limit; `0` means no limit
+- `PRODUCER_PROGRESS_INTERVAL` - print producer progress every N attempted rows, default `1000`
 - `PRODUCER_SEND_DELAY_MS` - delay between messages in milliseconds, default `250`
 
 ## Dataset profile paths
@@ -51,6 +52,12 @@ docker compose run --build --rm -e DATASET_PROFILE=full -e PRODUCER_SEND_DELAY_M
 ```
 
 Use `full` only when `data/raw/full_iot_logs.csv` exists locally and you intentionally want a heavier manual run.
+
+Runtime behavior:
+
+- prints startup settings including the resolved progress interval
+- prints progress lines every `PRODUCER_PROGRESS_INTERVAL` attempted rows
+- keeps the final sent/failed/skipped summary for bounded and larger runs
 
 ## Run locally with Go
 

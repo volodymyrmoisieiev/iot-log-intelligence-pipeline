@@ -24,6 +24,8 @@ This service consumes validated Kafka messages from `iot_processed_logs` and inv
 - inserts invalid records into `invalid_iot_logs`
 - preserves the full processed JSON message in PostgreSQL column `raw_payload`
 - supports bounded runs with `WAREHOUSE_LOADER_MAX_MESSAGES`
+- shows a `tqdm` progress bar when `tqdm` is installed and the process is attached to a real terminal
+- falls back to regular interval-based logs when `tqdm` is unavailable or output is being captured
 - logs regular progress updates during larger runs with `WAREHOUSE_LOADER_PROGRESS_INTERVAL`
 - exits cleanly after `WAREHOUSE_LOADER_IDLE_TIMEOUT_SECONDS` of inactivity
 

@@ -6,6 +6,7 @@ from confluent_kafka import Consumer
 from config import load_config
 from db import WarehouseDatabase
 from mapper import map_invalid_message, map_processed_message
+from progress import ProgressReporter
 
 
 logging.basicConfig(
@@ -32,6 +33,13 @@ def main() -> int:
     failed_count = 0
     consumed_count = 0
     last_message_at = time.monotonic()
+    progress = ProgressReporter(
+        logger=logger,
+        component_name="warehouse loader",
+        interval=config.warehouse_loader_progress_interval,
+        total=config.warehouse_loader_max_messages,
+        unit="msg",
+    )
 
     logger.info(
         "starting warehouse loader brokers=%s processed_topic=%s invalid_topic=%s postgres_host=%s postgres_port=%s postgres_db=%s group_id=%s max_messages=%s idle_timeout_seconds=%s progress_interval=%s",
@@ -85,7 +93,7 @@ def main() -> int:
                     row = map_processed_message(message.value())
                     database.insert_processed(row)
                     processed_count += 1
-                    logger.info(
+                    logger.debug(
                         "inserted processed record device_id=%s count=%s",
                         row.device_id,
                         processed_count,
@@ -94,7 +102,7 @@ def main() -> int:
                     row = map_invalid_message(message.value())
                     database.insert_invalid(row)
                     invalid_count += 1
-                    logger.info(
+                    logger.debug(
                         "inserted invalid record reason=%s count=%s",
                         row.error_reason,
                         invalid_count,
@@ -106,18 +114,17 @@ def main() -> int:
             except Exception as exc:
                 failed_count += 1
                 logger.exception("failed to process warehouse message: %s", exc)
-            if consumed_count % config.warehouse_loader_progress_interval == 0:
-                logger.info(
-                    "warehouse loader progress consumed=%s inserted_processed=%s inserted_invalid=%s failed=%s group_id=%s",
-                    consumed_count,
-                    processed_count,
-                    invalid_count,
-                    failed_count,
-                    config.warehouse_loader_group_id,
-                )
+            progress.update(
+                consumed_count,
+                inserted_processed=processed_count,
+                inserted_invalid=invalid_count,
+                failed=failed_count,
+                group_id=config.warehouse_loader_group_id,
+            )
     finally:
         consumer.close()
         database.close()
+        progress.close()
         logger.info(
             "warehouse loader summary consumed=%s inserted_processed=%s inserted_invalid=%s failed=%s max_messages=%s group_id=%s",
             consumed_count,

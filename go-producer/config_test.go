@@ -76,8 +76,52 @@ func TestLoadConfigParsesProducerMaxRows(t *testing.T) {
 		t.Fatalf("expected max rows 15, got %d", cfg.MaxRows)
 	}
 
+	if cfg.ProgressInterval != defaultProducerProgressInterval {
+		t.Fatalf("expected default progress interval %d, got %d", defaultProducerProgressInterval, cfg.ProgressInterval)
+	}
+
 	if cfg.DatasetProfile != datasetProfileFull {
 		t.Fatalf("expected dataset profile %s, got %s", datasetProfileFull, cfg.DatasetProfile)
+	}
+}
+
+func TestLoadConfigParsesProducerProgressInterval(t *testing.T) {
+	tempDir := t.TempDir()
+	inputFile := filepath.Join(tempDir, "sample.csv")
+	if err := writeTempFile(inputFile); err != nil {
+		t.Fatalf("writeTempFile returned error: %v", err)
+	}
+
+	t.Setenv("PRODUCER_INPUT_FILE", inputFile)
+	t.Setenv("PRODUCER_PROGRESS_INTERVAL", "250")
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig returned error: %v", err)
+	}
+
+	if cfg.ProgressInterval != 250 {
+		t.Fatalf("expected progress interval 250, got %d", cfg.ProgressInterval)
+	}
+}
+
+func TestLoadConfigRejectsInvalidProducerProgressInterval(t *testing.T) {
+	tempDir := t.TempDir()
+	inputFile := filepath.Join(tempDir, "sample.csv")
+	if err := writeTempFile(inputFile); err != nil {
+		t.Fatalf("writeTempFile returned error: %v", err)
+	}
+
+	t.Setenv("PRODUCER_INPUT_FILE", inputFile)
+	t.Setenv("PRODUCER_PROGRESS_INTERVAL", "0")
+
+	_, err := LoadConfig()
+	if err == nil {
+		t.Fatal("expected LoadConfig to reject zero progress interval")
+	}
+
+	if !strings.Contains(err.Error(), "PRODUCER_PROGRESS_INTERVAL must be greater than zero") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

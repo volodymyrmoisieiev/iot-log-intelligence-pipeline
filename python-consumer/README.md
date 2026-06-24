@@ -38,6 +38,8 @@ docker compose run --build --rm `
 Runtime behavior:
 
 - logs a startup line with brokers, topics, group id, max messages, idle timeout, and progress interval
+- shows a `tqdm` progress bar when `tqdm` is installed and the process is attached to a real terminal
+- falls back to regular interval-based logs when `tqdm` is unavailable or output is being captured
 - logs progress every `CONSUMER_PROGRESS_INTERVAL` consumed messages
 - exits clearly if no messages arrive before the idle timeout
 - prints a final summary with `consumed`, `processed`, `invalid`, `failed`, `max_messages`, and `group_id`

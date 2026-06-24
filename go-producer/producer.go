@@ -32,15 +32,22 @@ func (p *Producer) Close() error {
 	return p.writer.Close()
 }
 
-func (p *Producer) PublishRecords(ctx context.Context, records []CSVRecord, sendDelay time.Duration) (int, int) {
+func (p *Producer) PublishRecords(
+	ctx context.Context,
+	records []CSVRecord,
+	sendDelay time.Duration,
+	progressInterval int,
+) (int, int) {
 	var sentCount int
 	var failedCount int
+	totalRecords := len(records)
 
-	for _, record := range records {
+	for index, record := range records {
 		payload, err := record.ToJSONBytes(time.Now())
 		if err != nil {
 			failedCount++
 			fmt.Printf("failed to marshal record for device %s: %v\n", record.DeviceID, err)
+			logProducerProgress(index+1, totalRecords, sentCount, failedCount, progressInterval)
 			continue
 		}
 
@@ -52,10 +59,12 @@ func (p *Producer) PublishRecords(ctx context.Context, records []CSVRecord, send
 		if err := p.writer.WriteMessages(ctx, message); err != nil {
 			failedCount++
 			fmt.Printf("failed to publish record for device %s to topic %s: %v\n", record.DeviceID, p.topic, err)
+			logProducerProgress(index+1, totalRecords, sentCount, failedCount, progressInterval)
 			continue
 		}
 
 		sentCount++
+		logProducerProgress(index+1, totalRecords, sentCount, failedCount, progressInterval)
 
 		if sendDelay > 0 {
 			time.Sleep(sendDelay)
@@ -63,4 +72,22 @@ func (p *Producer) PublishRecords(ctx context.Context, records []CSVRecord, send
 	}
 
 	return sentCount, failedCount
+}
+
+func logProducerProgress(attemptedCount int, totalRecords int, sentCount int, failedCount int, progressInterval int) {
+	if progressInterval <= 0 {
+		return
+	}
+
+	if attemptedCount%progressInterval != 0 && attemptedCount != totalRecords {
+		return
+	}
+
+	fmt.Printf(
+		"producer progress attempted=%d total=%d sent=%d failed=%d\n",
+		attemptedCount,
+		totalRecords,
+		sentCount,
+		failedCount,
+	)
 }
