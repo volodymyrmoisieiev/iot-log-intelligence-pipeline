@@ -31,6 +31,7 @@ DEFAULT_POSTGRES_PASSWORD = "iot_password"
 DEFAULT_PROGRESS_INTERVAL = 1000
 DEFAULT_WAREHOUSE_LOADER_BATCH_SIZE = 1000
 KAFKA_TOPIC_TOOL_PATH = "/opt/kafka/bin/kafka-topics.sh"
+PROGRESS_MODE_CHOICES = ("auto", "log", "tqdm")
 
 REQUIRED_DIRECTORIES = [
     "airflow",
@@ -93,6 +94,14 @@ DOCKER_PERMISSION_HINTS = (
 
 class SmokeTestConfigurationError(Exception):
     """Raised when smoke test inputs are invalid."""
+
+
+@dataclass(frozen=True)
+class CommandExecutionResult:
+    return_code: int
+    stdout_text: str | None
+    stderr_text: str | None
+    streamed_output: bool
 
 
 @dataclass
@@ -176,6 +185,17 @@ def parse_args() -> argparse.Namespace:
         "--skip-terraform",
         action="store_true",
         help="Skip Terraform init/validate checks under infra/aws-orchestration.",
+    )
+    parser.add_argument(
+        "--stream-output",
+        action="store_true",
+        help="Stream subprocess stdout/stderr live to the terminal during manual runs.",
+    )
+    parser.add_argument(
+        "--progress-mode",
+        choices=PROGRESS_MODE_CHOICES,
+        default="auto",
+        help="Progress display mode for Python pipeline components. Default: auto.",
     )
     return parser.parse_args()
 
@@ -430,6 +450,50 @@ def create_pipeline_runtime_context(profile_name: str, max_rows: int) -> dict[st
     }
 
 
+def normalize_progress_mode(progress_mode: str) -> str:
+    if progress_mode == "auto":
+        return "tqdm_if_tty_else_log"
+    return progress_mode
+
+
+def run_process(
+    *,
+    command: list[str],
+    cwd: Path,
+    env: dict[str, str] | None,
+    stream_output: bool,
+) -> CommandExecutionResult:
+    if stream_output:
+        result = subprocess.run(
+            command,
+            cwd=cwd,
+            env=env,
+            text=True,
+            check=False,
+        )
+        return CommandExecutionResult(
+            return_code=result.returncode,
+            stdout_text=None,
+            stderr_text=None,
+            streamed_output=True,
+        )
+
+    result = subprocess.run(
+        command,
+        cwd=cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return CommandExecutionResult(
+        return_code=result.returncode,
+        stdout_text=result.stdout,
+        stderr_text=result.stderr,
+        streamed_output=False,
+    )
+
+
 def run_command_sequence(
     *,
     name: str,
@@ -440,6 +504,7 @@ def run_command_sequence(
     dry_run: bool,
     success_detail: str,
     dry_run_detail: str,
+    stream_output: bool = False,
     metadata: dict[str, Any] | None = None,
 ) -> CheckResult:
     start_time = time.time()
@@ -458,13 +523,11 @@ def run_command_sequence(
 
     for command in commands:
         try:
-            result = subprocess.run(
-                command,
+            result = run_process(
+                command=command,
                 cwd=cwd,
                 env=env,
-                capture_output=True,
-                text=True,
-                check=False,
+                stream_output=stream_output,
             )
         except FileNotFoundError as exc:
             return make_result(
@@ -477,14 +540,17 @@ def run_command_sequence(
                 metadata=metadata,
             )
 
-        if result.stdout:
+        if result.streamed_output:
+            combined_stdout = ["streamed to terminal"]
+            combined_stderr = ["streamed to terminal"]
+        elif result.stdout_text:
             combined_stdout.append("$ " + " ".join(command))
-            combined_stdout.append(result.stdout.strip())
-        if result.stderr:
+            combined_stdout.append(result.stdout_text.strip())
+        if not result.streamed_output and result.stderr_text:
             combined_stderr.append("$ " + " ".join(command))
-            combined_stderr.append(result.stderr.strip())
+            combined_stderr.append(result.stderr_text.strip())
 
-        if result.returncode != 0:
+        if result.return_code != 0:
             return make_result(
                 name=name,
                 status="failed",
@@ -492,9 +558,9 @@ def run_command_sequence(
                 details="Command sequence returned a non-zero exit code.",
                 start_time=start_time,
                 command=command,
-                return_code=result.returncode,
-                stdout_excerpt=shorten_output("\n".join(combined_stdout)),
-                stderr_excerpt=shorten_output("\n".join(combined_stderr)),
+                return_code=result.return_code,
+                stdout_excerpt=shorten_output("\n".join(combined_stdout)) if combined_stdout else None,
+                stderr_excerpt=shorten_output("\n".join(combined_stderr)) if combined_stderr else None,
                 metadata=metadata,
             )
 
@@ -504,8 +570,8 @@ def run_command_sequence(
         required=required,
         details=success_detail,
         start_time=start_time,
-        stdout_excerpt=shorten_output("\n".join(combined_stdout)),
-        stderr_excerpt=shorten_output("\n".join(combined_stderr)),
+        stdout_excerpt=shorten_output("\n".join(combined_stdout)) if combined_stdout else None,
+        stderr_excerpt=shorten_output("\n".join(combined_stderr)) if combined_stderr else None,
         metadata=metadata,
     )
 
@@ -658,6 +724,8 @@ def run_controlled_profile_pipeline(
     max_rows: int,
     dry_run: bool,
     skip_anomaly_detection: bool,
+    stream_output: bool,
+    progress_mode: str,
 ) -> list[CheckResult]:
     expected_rows = count_bounded_dataset_rows(dataset_path=dataset_path, max_rows=max_rows)
     context = create_pipeline_runtime_context(profile_name=profile_name, max_rows=max_rows)
@@ -668,6 +736,7 @@ def run_controlled_profile_pipeline(
     context["consumer_progress_interval"] = progress_interval
     context["warehouse_loader_progress_interval"] = progress_interval
     context["warehouse_loader_batch_size"] = DEFAULT_WAREHOUSE_LOADER_BATCH_SIZE
+    context["python_progress_mode"] = normalize_progress_mode(progress_mode)
 
     if expected_rows == 0:
         return [
@@ -695,6 +764,7 @@ def run_controlled_profile_pipeline(
             dry_run_detail=(
                 f"Would start kafka, kafka-init, and postgres for the controlled {profile_name} runtime flow."
             ),
+            stream_output=stream_output,
         )
     )
     if not dry_run and results[-1].status == "failed":
@@ -737,6 +807,7 @@ def run_controlled_profile_pipeline(
             dry_run_detail=(
                 f"Would create isolated Kafka topics for raw, processed, and invalid {profile_name} runtime messages."
             ),
+            stream_output=stream_output,
             metadata={
                 **context,
                 "raw_topic": context["raw_topic"],
@@ -796,10 +867,12 @@ def run_controlled_profile_pipeline(
                 f"Would run the Go producer with DATASET_PROFILE={profile_name}, PRODUCER_MAX_ROWS={expected_rows}, "
                 f"PRODUCER_PROGRESS_INTERVAL={context['producer_progress_interval']}, and PRODUCER_SEND_DELAY_MS=0."
             ),
+            stream_output=stream_output,
             metadata={
                 **context,
                 "component": "producer",
                 "progress_interval": context["producer_progress_interval"],
+                "output_mode": "streamed" if stream_output else "captured",
             },
         )
     )
@@ -824,6 +897,8 @@ def run_controlled_profile_pipeline(
         f"CONSUMER_MAX_MESSAGES={expected_rows}",
         "-e",
         f"CONSUMER_PROGRESS_INTERVAL={context['consumer_progress_interval']}",
+        "-e",
+        f"PYTHON_PROGRESS_MODE={progress_mode}",
         "python-consumer",
     ]
     results.append(
@@ -837,13 +912,17 @@ def run_controlled_profile_pipeline(
             ),
             dry_run_detail=(
                 f"Would run the Python consumer with CONSUMER_MAX_MESSAGES={expected_rows}, "
-                f"CONSUMER_PROGRESS_INTERVAL={context['consumer_progress_interval']}, and isolated Kafka topics."
+                f"CONSUMER_PROGRESS_INTERVAL={context['consumer_progress_interval']}, "
+                f"PYTHON_PROGRESS_MODE={progress_mode}, and isolated Kafka topics."
             ),
-            stream_output_to_temp=True,
+            stream_output=stream_output,
+            stream_output_to_temp=not stream_output,
             metadata={
                 **context,
                 "component": "consumer",
                 "progress_interval": context["consumer_progress_interval"],
+                "progress_mode": normalize_progress_mode(progress_mode),
+                "output_mode": "streamed" if stream_output else "captured",
             },
         )
     )
@@ -868,6 +947,8 @@ def run_controlled_profile_pipeline(
         f"WAREHOUSE_LOADER_PROGRESS_INTERVAL={context['warehouse_loader_progress_interval']}",
         "-e",
         f"WAREHOUSE_LOADER_BATCH_SIZE={context['warehouse_loader_batch_size']}",
+        "-e",
+        f"PYTHON_PROGRESS_MODE={progress_mode}",
         "warehouse-loader",
     ]
     results.append(
@@ -882,14 +963,18 @@ def run_controlled_profile_pipeline(
             dry_run_detail=(
                 f"Would run the warehouse loader with WAREHOUSE_LOADER_MAX_MESSAGES={expected_rows}, "
                 f"WAREHOUSE_LOADER_PROGRESS_INTERVAL={context['warehouse_loader_progress_interval']}, "
-                f"WAREHOUSE_LOADER_BATCH_SIZE={context['warehouse_loader_batch_size']}, and isolated Kafka topics."
+                f"WAREHOUSE_LOADER_BATCH_SIZE={context['warehouse_loader_batch_size']}, "
+                f"PYTHON_PROGRESS_MODE={progress_mode}, and isolated Kafka topics."
             ),
-            stream_output_to_temp=True,
+            stream_output=stream_output,
+            stream_output_to_temp=not stream_output,
             metadata={
                 **context,
                 "component": "warehouse_loader",
                 "progress_interval": context["warehouse_loader_progress_interval"],
                 "batch_size": context["warehouse_loader_batch_size"],
+                "progress_mode": normalize_progress_mode(progress_mode),
+                "output_mode": "streamed" if stream_output else "captured",
             },
         )
     )
@@ -972,6 +1057,7 @@ def run_command(
     success_detail: str,
     dry_run_detail: str,
     stream_output_to_temp: bool = False,
+    stream_output: bool = False,
     metadata: dict[str, Any] | None = None,
 ) -> CheckResult:
     start_time = time.time()
@@ -987,7 +1073,16 @@ def run_command(
         )
 
     try:
-        if stream_output_to_temp:
+        if stream_output:
+            result = run_process(
+                command=command,
+                cwd=cwd,
+                env=env,
+                stream_output=True,
+            )
+            stdout_text = "streamed to terminal"
+            stderr_text = "streamed to terminal"
+        elif stream_output_to_temp:
             stdout_file = tempfile.NamedTemporaryFile(suffix=".log", delete=False)
             stderr_file = tempfile.NamedTemporaryFile(suffix=".log", delete=False)
             stdout_path = Path(stdout_file.name)
@@ -998,31 +1093,21 @@ def run_command(
                 with stdout_path.open("w", encoding="utf-8") as stdout_handle, stderr_path.open(
                     "w", encoding="utf-8"
                 ) as stderr_handle:
-                    result = subprocess.run(
-                        command,
-                        cwd=cwd,
-                        env=env,
-                        stdout=stdout_handle,
-                        stderr=stderr_handle,
-                        text=True,
-                        check=False,
-                    )
+                    result = subprocess.run(command, cwd=cwd, env=env, stdout=stdout_handle, stderr=stderr_handle, text=True, check=False)
                 stdout_text = read_text_if_exists(stdout_path)
                 stderr_text = read_text_if_exists(stderr_path)
             finally:
                 stdout_path.unlink(missing_ok=True)
                 stderr_path.unlink(missing_ok=True)
         else:
-            result = subprocess.run(
-                command,
+            result = run_process(
+                command=command,
                 cwd=cwd,
                 env=env,
-                capture_output=True,
-                text=True,
-                check=False,
+                stream_output=False,
             )
-            stdout_text = result.stdout
-            stderr_text = result.stderr
+            stdout_text = result.stdout_text
+            stderr_text = result.stderr_text
     except FileNotFoundError as exc:
         return make_result(
             name=name,
@@ -1034,8 +1119,9 @@ def run_command(
             metadata=metadata,
         )
 
-    status = "passed" if result.returncode == 0 else "failed"
-    details = success_detail if result.returncode == 0 else "Command returned a non-zero exit code."
+    return_code = result.returncode if stream_output_to_temp else result.return_code
+    status = "passed" if return_code == 0 else "failed"
+    details = success_detail if return_code == 0 else "Command returned a non-zero exit code."
     return make_result(
         name=name,
         status=status,
@@ -1043,7 +1129,7 @@ def run_command(
         details=details,
         start_time=start_time,
         command=command,
-        return_code=result.returncode,
+        return_code=return_code,
         stdout_excerpt=shorten_output(stdout_text),
         stderr_excerpt=shorten_output(stderr_text),
         metadata=metadata,
@@ -1622,6 +1708,8 @@ def build_output_payload(
         "dataset_path": str(dataset_path),
         "max_rows": args.max_rows,
         "dry_run": args.dry_run,
+        "stream_output": args.stream_output,
+        "progress_mode": normalize_progress_mode(args.progress_mode),
         "run_profile_pipeline": args.run_profile_pipeline,
         "run_sample_pipeline": args.run_sample_pipeline,
         "allow_full_run": args.allow_full_run,
@@ -1692,6 +1780,7 @@ def main() -> int:
                 dry_run=args.dry_run,
                 success_detail="docker compose config completed successfully.",
                 dry_run_detail="Would run docker compose config without starting services.",
+                stream_output=args.stream_output,
             ),
             check_python_syntax(skip_airflow=args.skip_airflow),
             run_terraform_validation(
@@ -1734,6 +1823,8 @@ def main() -> int:
                     max_rows=args.max_rows,
                     dry_run=args.dry_run,
                     skip_anomaly_detection=args.skip_anomaly_detection,
+                    stream_output=args.stream_output,
+                    progress_mode=args.progress_mode,
                 )
             )
         elif args.run_profile_pipeline:
