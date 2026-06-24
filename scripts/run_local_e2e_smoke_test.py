@@ -136,12 +136,24 @@ def parse_args() -> argparse.Namespace:
         help="Optional path for a JSON smoke test summary.",
     )
     parser.add_argument(
+        "--run-profile-pipeline",
+        action="store_true",
+        help=(
+            "Run a controlled profile-specific producer/consumer/warehouse-loader flow "
+            "with bounded row limits."
+        ),
+    )
+    parser.add_argument(
         "--run-sample-pipeline",
         action="store_true",
         help=(
-            "Run a controlled sample-profile producer/consumer/warehouse-loader flow "
-            "with bounded row limits."
+            "Backward-compatible alias for --run-profile-pipeline when --profile sample is used."
         ),
+    )
+    parser.add_argument(
+        "--allow-full-run",
+        action="store_true",
+        help="Explicitly allow a controlled full-profile runtime flow.",
     )
     parser.add_argument(
         "--skip-airflow",
@@ -212,8 +224,13 @@ def ensure_args_are_valid(args: argparse.Namespace) -> None:
         raise SmokeTestConfigurationError("--max-rows must be a positive integer.")
     if args.run_sample_pipeline and args.profile != "sample":
         raise SmokeTestConfigurationError(
-            "Stage 21B controlled runtime mode currently supports only --profile sample. "
-            "Larger-profile validation is reserved for later Stage 21C/21D work."
+            "--run-sample-pipeline is a backward-compatible alias for the sample profile only. "
+            "Use --run-profile-pipeline for medium or future profile runtime checks."
+        )
+    if args.run_profile_pipeline and args.profile == "full" and not args.allow_full_run:
+        raise SmokeTestConfigurationError(
+            "Refusing --profile full --run-profile-pipeline without --allow-full-run. "
+            "Full or 100k-style validation is reserved for later Stage 21D work."
         )
 
 
@@ -271,7 +288,7 @@ def is_docker_permission_issue(text: str | None) -> bool:
     return any(hint in lowered for hint in DOCKER_PERMISSION_HINTS)
 
 
-def count_dataset_rows(dataset_path: Path, max_rows: int) -> int:
+def count_bounded_dataset_rows(dataset_path: Path, max_rows: int) -> int:
     with dataset_path.open("r", newline="", encoding="utf-8-sig") as source_file:
         reader = csv.reader(source_file)
         header = next(reader, None)
@@ -288,19 +305,92 @@ def count_dataset_rows(dataset_path: Path, max_rows: int) -> int:
         return row_count
 
 
+def count_total_dataset_rows(dataset_path: Path) -> int:
+    with dataset_path.open("r", newline="", encoding="utf-8-sig") as source_file:
+        reader = csv.reader(source_file)
+        header = next(reader, None)
+        if header is None:
+            raise SmokeTestConfigurationError(
+                f"Dataset file is missing a header row: {dataset_path}"
+            )
+
+        return sum(1 for _ in reader)
+
+
+def build_missing_dataset_instruction(profile_name: str) -> str:
+    if profile_name == "medium":
+        return (
+            "Generate it first with: python .\\scripts\\create_dataset_profile.py "
+            "--input .\\data\\raw\\RT_IOT2022.csv --output .\\data\\processed\\medium_iot_logs.csv "
+            "--rows 10000 --overwrite"
+        )
+    if profile_name == "full":
+        return (
+            "Place the full dataset at data/raw/full_iot_logs.csv and use --allow-full-run "
+            "only for an intentional full-profile runtime check."
+        )
+    return "Restore or provide the selected dataset file before running the smoke test."
+
+
+def check_dataset_preflight(
+    *,
+    profile_name: str,
+    dataset_path: Path,
+    max_rows: int,
+) -> CheckResult:
+    start_time = time.time()
+    metadata: dict[str, Any] = {
+        "profile": profile_name,
+        "resolved_dataset_path": str(dataset_path),
+        "dataset_exists": dataset_path.is_file(),
+        "requested_max_rows": max_rows,
+    }
+
+    if not dataset_path.is_file():
+        return make_result(
+            name="dataset_preflight",
+            status="failed",
+            required=True,
+            details=(
+                f"Resolved dataset path for profile '{profile_name}' is missing: {dataset_path}. "
+                + build_missing_dataset_instruction(profile_name)
+            ),
+            start_time=start_time,
+            metadata=metadata,
+        )
+
+    available_rows = count_total_dataset_rows(dataset_path)
+    metadata["available_rows"] = available_rows
+    metadata["bounded_rows_for_checks"] = min(available_rows, max_rows)
+    details = (
+        f"Resolved dataset path: {dataset_path}. Exists: yes. "
+        f"Available rows: {available_rows}. "
+        f"Bounded rows for checks/runtime: {min(available_rows, max_rows)}."
+    )
+    return make_result(
+        name="dataset_preflight",
+        status="passed",
+        required=True,
+        details=details,
+        start_time=start_time,
+        metadata=metadata,
+    )
+
+
 def build_runtime_id(prefix: str) -> str:
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return f"{prefix}-{timestamp}-{os.getpid()}"
 
 
-def create_pipeline_runtime_context(max_rows: int) -> dict[str, Any]:
-    runtime_id = build_runtime_id("stage21b-sample")
+def create_pipeline_runtime_context(profile_name: str, max_rows: int) -> dict[str, Any]:
+    runtime_id = build_runtime_id(f"stage21c-{profile_name}")
     topic_suffix = runtime_id.replace("-", "_")
     raw_topic = f"iot_raw_logs_{topic_suffix}"
     processed_topic = f"iot_processed_logs_{topic_suffix}"
     invalid_topic = f"iot_invalid_logs_{topic_suffix}"
     return {
         "runtime_id": runtime_id,
+        "profile": profile_name,
         "raw_topic": raw_topic,
         "processed_topic": processed_topic,
         "invalid_topic": invalid_topic,
@@ -435,7 +525,7 @@ def read_postgres_counts() -> tuple[CheckResult, dict[str, int] | None]:
     except FileNotFoundError as exc:
         return (
             make_result(
-                name="sample_pipeline_postgres_counts",
+                name="profile_pipeline_postgres_counts",
                 status="failed",
                 required=True,
                 details=f"Command not found: {command[0]} ({exc})",
@@ -448,7 +538,7 @@ def read_postgres_counts() -> tuple[CheckResult, dict[str, int] | None]:
     if result.returncode != 0:
         return (
             make_result(
-                name="sample_pipeline_postgres_counts",
+                name="profile_pipeline_postgres_counts",
                 status="failed",
                 required=True,
                 details="Failed to read PostgreSQL row counts after the controlled runtime flow.",
@@ -465,7 +555,7 @@ def read_postgres_counts() -> tuple[CheckResult, dict[str, int] | None]:
     if not raw_output:
         return (
             make_result(
-                name="sample_pipeline_postgres_counts",
+                name="profile_pipeline_postgres_counts",
                 status="failed",
                 required=True,
                 details="PostgreSQL row-count query returned no output.",
@@ -482,7 +572,7 @@ def read_postgres_counts() -> tuple[CheckResult, dict[str, int] | None]:
     if len(parts) != 2:
         return (
             make_result(
-                name="sample_pipeline_postgres_counts",
+                name="profile_pipeline_postgres_counts",
                 status="failed",
                 required=True,
                 details="PostgreSQL row-count query returned an unexpected format.",
@@ -502,7 +592,7 @@ def read_postgres_counts() -> tuple[CheckResult, dict[str, int] | None]:
     except ValueError:
         return (
             make_result(
-                name="sample_pipeline_postgres_counts",
+                name="profile_pipeline_postgres_counts",
                 status="failed",
                 required=True,
                 details="PostgreSQL row-count query returned non-integer values.",
@@ -516,7 +606,7 @@ def read_postgres_counts() -> tuple[CheckResult, dict[str, int] | None]:
 
     return (
         make_result(
-            name="sample_pipeline_postgres_counts",
+            name="profile_pipeline_postgres_counts",
             status="passed",
             required=True,
             details="Captured PostgreSQL processed/invalid row counts.",
@@ -531,24 +621,28 @@ def read_postgres_counts() -> tuple[CheckResult, dict[str, int] | None]:
     )
 
 
-def run_controlled_sample_pipeline(
+def run_controlled_profile_pipeline(
     *,
+    profile_name: str,
     dataset_path: Path,
     max_rows: int,
     dry_run: bool,
     skip_anomaly_detection: bool,
 ) -> list[CheckResult]:
-    expected_rows = count_dataset_rows(dataset_path=dataset_path, max_rows=max_rows)
-    context = create_pipeline_runtime_context(max_rows=max_rows)
+    expected_rows = count_bounded_dataset_rows(dataset_path=dataset_path, max_rows=max_rows)
+    context = create_pipeline_runtime_context(profile_name=profile_name, max_rows=max_rows)
+    context["resolved_dataset_path"] = str(dataset_path)
     context["expected_dataset_rows"] = expected_rows
 
     if expected_rows == 0:
         return [
             make_result(
-                name="sample_pipeline_runtime",
+                name="profile_pipeline_runtime",
                 status="failed",
                 required=True,
-                details="The selected sample dataset has no data rows to exercise in runtime mode.",
+                details=(
+                    f"The selected {profile_name} dataset has no data rows to exercise in runtime mode."
+                ),
                 metadata=context,
             )
         ]
@@ -556,15 +650,16 @@ def run_controlled_sample_pipeline(
     results: list[CheckResult] = []
     results.append(
         run_command(
-            name="sample_pipeline_start_services",
+            name="profile_pipeline_start_services",
             command=["docker", "compose", "up", "-d", "kafka", "kafka-init", "postgres"],
             required=True,
             dry_run=dry_run,
-            success_detail="Started required Docker Compose services for the controlled sample runtime flow.",
-            dry_run_detail=(
-                "Would start kafka, kafka-init, and postgres for the controlled sample runtime flow."
+            success_detail=(
+                f"Started required Docker Compose services for the controlled {profile_name} runtime flow."
             ),
-            env=None,
+            dry_run_detail=(
+                f"Would start kafka, kafka-init, and postgres for the controlled {profile_name} runtime flow."
+            ),
         )
     )
     if not dry_run and results[-1].status == "failed":
@@ -597,13 +692,18 @@ def run_controlled_sample_pipeline(
     ]
     results.append(
         run_command_sequence(
-            name="sample_pipeline_create_topics",
+            name="profile_pipeline_create_topics",
             commands=topic_commands,
             required=True,
             dry_run=dry_run,
-            success_detail="Created isolated Kafka topics for the controlled sample runtime flow.",
-            dry_run_detail="Would create isolated Kafka topics for raw, processed, and invalid sample-runtime messages.",
+            success_detail=(
+                f"Created isolated Kafka topics for the controlled {profile_name} runtime flow."
+            ),
+            dry_run_detail=(
+                f"Would create isolated Kafka topics for raw, processed, and invalid {profile_name} runtime messages."
+            ),
             metadata={
+                **context,
                 "raw_topic": context["raw_topic"],
                 "processed_topic": context["processed_topic"],
                 "invalid_topic": context["invalid_topic"],
@@ -615,15 +715,17 @@ def run_controlled_sample_pipeline(
 
     pre_counts_result, pre_counts = read_postgres_counts() if not dry_run else (
         make_result(
-            name="sample_pipeline_pre_run_postgres_counts",
+            name="profile_pipeline_pre_run_postgres_counts",
             status="dry_run",
             required=True,
-            details="Would capture PostgreSQL row counts before running the controlled sample pipeline.",
+            details=(
+                f"Would capture PostgreSQL row counts before running the controlled {profile_name} pipeline."
+            ),
             metadata=context,
         ),
         None,
     )
-    pre_counts_result.name = "sample_pipeline_pre_run_postgres_counts"
+    pre_counts_result.name = "profile_pipeline_pre_run_postgres_counts"
     results.append(pre_counts_result)
     if not dry_run and results[-1].status == "failed":
         return results
@@ -635,7 +737,7 @@ def run_controlled_sample_pipeline(
         "--rm",
         "--build",
         "-e",
-        "DATASET_PROFILE=sample",
+        f"DATASET_PROFILE={profile_name}",
         "-e",
         f"KAFKA_RAW_TOPIC={context['raw_topic']}",
         "-e",
@@ -646,15 +748,15 @@ def run_controlled_sample_pipeline(
     ]
     results.append(
         run_command(
-            name="sample_pipeline_producer",
+            name="profile_pipeline_producer",
             command=producer_command,
             required=True,
             dry_run=dry_run,
             success_detail=(
-                f"Ran the Go producer against the sample profile with a row limit of {expected_rows}."
+                f"Ran the Go producer against the {profile_name} profile with a row limit of {expected_rows}."
             ),
             dry_run_detail=(
-                f"Would run the Go producer with DATASET_PROFILE=sample, PRODUCER_MAX_ROWS={expected_rows}, "
+                f"Would run the Go producer with DATASET_PROFILE={profile_name}, PRODUCER_MAX_ROWS={expected_rows}, "
                 "and PRODUCER_SEND_DELAY_MS=0."
             ),
         )
@@ -684,12 +786,12 @@ def run_controlled_sample_pipeline(
     ]
     results.append(
         run_command(
-            name="sample_pipeline_consumer",
+            name="profile_pipeline_consumer",
             command=consumer_command,
             required=True,
             dry_run=dry_run,
             success_detail=(
-                f"Ran the Python consumer with CONSUMER_MAX_MESSAGES={expected_rows} on the isolated sample topics."
+                f"Ran the Python consumer with CONSUMER_MAX_MESSAGES={expected_rows} on the isolated {profile_name} topics."
             ),
             dry_run_detail=(
                 f"Would run the Python consumer with CONSUMER_MAX_MESSAGES={expected_rows} and isolated Kafka topics."
@@ -719,12 +821,12 @@ def run_controlled_sample_pipeline(
     ]
     results.append(
         run_command(
-            name="sample_pipeline_warehouse_loader",
+            name="profile_pipeline_warehouse_loader",
             command=loader_command,
             required=True,
             dry_run=dry_run,
             success_detail=(
-                f"Ran the warehouse loader with WAREHOUSE_LOADER_MAX_MESSAGES={expected_rows} on the isolated sample topics."
+                f"Ran the warehouse loader with WAREHOUSE_LOADER_MAX_MESSAGES={expected_rows} on the isolated {profile_name} topics."
             ),
             dry_run_detail=(
                 f"Would run the warehouse loader with WAREHOUSE_LOADER_MAX_MESSAGES={expected_rows} and isolated Kafka topics."
@@ -737,16 +839,18 @@ def run_controlled_sample_pipeline(
     if dry_run:
         results.append(
             make_result(
-                name="sample_pipeline_verify_postgres_deltas",
+                name="profile_pipeline_verify_postgres_deltas",
                 status="dry_run",
                 required=True,
-                details="Would compare PostgreSQL row-count deltas after the controlled sample runtime flow.",
+                details=(
+                    f"Would compare PostgreSQL row-count deltas after the controlled {profile_name} runtime flow."
+                ),
                 metadata=context,
             )
         )
     else:
         post_counts_result, post_counts = read_postgres_counts()
-        post_counts_result.name = "sample_pipeline_post_run_postgres_counts"
+        post_counts_result.name = "profile_pipeline_post_run_postgres_counts"
         results.append(post_counts_result)
         if results[-1].status == "failed":
             return results
@@ -756,19 +860,23 @@ def run_controlled_sample_pipeline(
             invalid_delta = post_counts["invalid_count"] - pre_counts["invalid_count"]
             total_delta = processed_delta + invalid_delta
             details = (
-                f"PostgreSQL row-count delta after the controlled sample runtime flow: "
+                f"PostgreSQL row-count delta after the controlled {profile_name} runtime flow: "
                 f"processed_delta={processed_delta}, invalid_delta={invalid_delta}, total_delta={total_delta}, "
                 f"expected_rows={expected_rows}."
             )
-            status = "passed" if total_delta == expected_rows and processed_delta >= 0 and invalid_delta >= 0 else "failed"
+            status = (
+                "passed"
+                if total_delta == expected_rows and processed_delta >= 0 and invalid_delta >= 0
+                else "failed"
+            )
             if total_delta != expected_rows:
                 details = (
-                    f"Controlled sample runtime loaded {total_delta} total rows into PostgreSQL, "
-                    f"but expected {expected_rows} rows from the bounded sample dataset."
+                    f"Controlled {profile_name} runtime loaded {total_delta} total rows into PostgreSQL, "
+                    f"but expected {expected_rows} rows from the bounded {profile_name} dataset."
                 )
             results.append(
                 make_result(
-                    name="sample_pipeline_verify_postgres_deltas",
+                    name="profile_pipeline_verify_postgres_deltas",
                     status=status,
                     required=True,
                     details=details,
@@ -787,7 +895,7 @@ def run_controlled_sample_pipeline(
         skip_anomaly_detection=skip_anomaly_detection,
         max_rows=expected_rows,
         dry_run=dry_run,
-        check_name="sample_pipeline_anomaly_detection_read_only",
+        check_name="profile_pipeline_anomaly_detection_read_only",
     )
     results.append(anomaly_result)
     return results
@@ -1360,11 +1468,14 @@ def build_output_payload(
         "dataset_path": str(dataset_path),
         "max_rows": args.max_rows,
         "dry_run": args.dry_run,
+        "run_profile_pipeline": args.run_profile_pipeline,
         "run_sample_pipeline": args.run_sample_pipeline,
+        "allow_full_run": args.allow_full_run,
         "safeguards": {
             "starts_full_pipeline": False,
-            "runs_controlled_sample_pipeline_only_when_requested": True,
+            "runs_controlled_profile_pipeline_only_when_requested": True,
             "runs_full_dataset_by_default": False,
+            "requires_allow_full_run_for_full_profile_runtime": True,
             "deploys_aws": False,
             "runs_terraform_apply": False,
         },
@@ -1386,6 +1497,8 @@ def write_output_json(output_path: Path, payload: dict[str, Any]) -> None:
 
 def main() -> int:
     args = parse_args()
+    if args.run_sample_pipeline:
+        args.run_profile_pipeline = True
 
     try:
         ensure_args_are_valid(args)
@@ -1406,6 +1519,11 @@ def main() -> int:
         results = [
             check_expected_repository_structure(),
             check_selected_dataset(
+                profile_name=args.profile,
+                dataset_path=dataset_path,
+                max_rows=args.max_rows,
+            ),
+            check_dataset_preflight(
                 profile_name=args.profile,
                 dataset_path=dataset_path,
                 max_rows=args.max_rows,
@@ -1452,22 +1570,35 @@ def main() -> int:
             )
         )
 
-        if args.run_sample_pipeline:
+        if args.run_profile_pipeline and dataset_path.is_file():
             results.extend(
-                run_controlled_sample_pipeline(
+                run_controlled_profile_pipeline(
+                    profile_name=args.profile,
                     dataset_path=dataset_path,
                     max_rows=args.max_rows,
                     dry_run=args.dry_run,
                     skip_anomaly_detection=args.skip_anomaly_detection,
                 )
             )
+        elif args.run_profile_pipeline:
+            results.append(
+                make_result(
+                    name="profile_pipeline_runtime",
+                    status="failed",
+                    required=True,
+                    details=(
+                        f"Cannot run the controlled {args.profile} profile pipeline because the "
+                        f"resolved dataset file is missing. {build_missing_dataset_instruction(args.profile)}"
+                    ),
+                )
+            )
         else:
             results.append(
                 make_result(
-                    name="sample_pipeline_runtime",
+                    name="profile_pipeline_runtime",
                     status="skipped",
                     required=False,
-                    details="Skipped because --run-sample-pipeline was not provided.",
+                    details="Skipped because neither --run-profile-pipeline nor --run-sample-pipeline was provided.",
                 )
             )
 
