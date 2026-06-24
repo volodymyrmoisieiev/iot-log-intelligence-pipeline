@@ -20,6 +20,8 @@ The script lives at `scripts/run_local_e2e_smoke_test.py` and uses only the Pyth
 
 For the final Stage 21 runbook, validated full-run summary, bottleneck notes, and PR-ready cleanup guidance, see [docs/stage-21-local-e2e-validation.md](docs/stage-21-local-e2e-validation.md).
 
+For the final Stage 22 progress, batching, and full-benchmark runbook, see [docs/stage-22-progress-and-loader-optimization.md](docs/stage-22-progress-and-loader-optimization.md).
+
 ## Why This Is Not a Full Dataset Run
 
 The smoke test keeps `sample` as the default profile and caps row-oriented dataset checks with `--max-rows` so normal local validation stays fast, predictable, and inexpensive.
@@ -80,12 +82,20 @@ What this mode adds:
 
 - starts the required Docker Compose services for Kafka and PostgreSQL
 - creates isolated Kafka topics for the controlled runtime pass
-- runs the Go producer with `DATASET_PROFILE=sample`, `PRODUCER_MAX_ROWS`, and `PRODUCER_SEND_DELAY_MS=0`
-- runs the Python consumer with matching `CONSUMER_MAX_MESSAGES`
-- runs the warehouse loader with matching `WAREHOUSE_LOADER_MAX_MESSAGES`
+- runs the Go producer with `DATASET_PROFILE=sample`, `PRODUCER_MAX_ROWS`, `PRODUCER_PROGRESS_INTERVAL`, and `PRODUCER_SEND_DELAY_MS=0`
+- runs the Python consumer with matching `CONSUMER_MAX_MESSAGES` and `CONSUMER_PROGRESS_INTERVAL`
+- runs the warehouse loader with matching `WAREHOUSE_LOADER_MAX_MESSAGES`, `WAREHOUSE_LOADER_PROGRESS_INTERVAL`, and `WAREHOUSE_LOADER_BATCH_SIZE`
 - captures PostgreSQL row counts before and after the run and verifies the row-count delta
 - reruns bounded data-contract validation
 - attempts anomaly detection in safe read-only mode and records either a result or an explicit `skip`
+
+How progress is displayed in this mode:
+
+- the Go producer prints interval-based progress lines such as attempted, sent, and failed counts
+- the Python consumer and warehouse loader use `tqdm` only when it is installed and the process is attached to a real terminal
+- when `tqdm` is unavailable or output is being captured, the Python components fall back to regular interval-based log lines
+- the JSON summary records the effective per-component progress intervals under `profile_pipeline_progress`
+- the warehouse-loader entry in that summary now also records the effective `batch_size`
 
 This still does not run `terraform apply`, deploy AWS resources, or switch the repository to a full-dataset validation path.
 
@@ -155,11 +165,53 @@ The JSON report now records stage durations for:
 - PostgreSQL verification
 - anomaly detection
 
+It also records the effective progress configuration for the controlled runtime flow:
+
+- `producer.progress_interval`
+- `consumer.progress_interval`
+- `warehouse_loader.progress_interval`
+- `warehouse_loader.batch_size`
+- Python progress mode as `tqdm_if_tty_else_log`
+
+Validated Stage 22C full `100000`-row result:
+
+- available rows: `100000`
+- expected rows: `100000`
+- processed delta: `100000`
+- invalid delta: `0`
+- total delta: `100000`
+- producer duration: `158.816s`
+- consumer duration: `34.504s`
+- warehouse loader duration: `15.279s`
+- data contract validation duration: `1.589s`
+- anomaly detection duration: `1.654s`
+- `WAREHOUSE_LOADER_BATCH_SIZE`: `1000`
+- progress intervals: producer `1000`, consumer `1000`, warehouse loader `1000`
+
 Expected runtime note:
 
 - a `100000`-row run can take noticeably longer than sample or medium validation
 - Docker health, Kafka throughput, and local PostgreSQL performance will affect total runtime
 - `PRODUCER_SEND_DELAY_MS=0` stays enforced for controlled runtime validation so the producer does not add artificial delay
+- progress intervals default to `1000`, and the smoke-test helper may lower the interval for smaller bounded runs so at least one visible progress update is still emitted
+- `WAREHOUSE_LOADER_BATCH_SIZE` defaults to `1000` for the controlled runtime flow so medium and full runs can compare loader timing more meaningfully
+- Stage 22B adds batch insert optimization on top of the Stage 22A progress visibility foundation
+
+Known before and after warehouse-loader comparison for the full `100000`-row path:
+
+- Stage 21 baseline warehouse loader: `758.764s`
+- Stage 22C post-optimization warehouse loader: `15.279s`
+- correctness stayed intact with `processed_delta=100000` and `invalid_delta=0`
+
+## Comparing Before And After Runtime
+
+To compare warehouse-loader behavior before and after this optimization:
+
+- run the same `medium` or `full` command with the same `--max-rows`
+- compare `stage_durations_seconds.warehouse_loader` in the generated JSON summaries
+- keep `WAREHOUSE_LOADER_BATCH_SIZE` fixed first, then vary it intentionally if you want to test different tradeoffs
+
+Remember that the generated JSON summary is a local validation artifact only. `docs/e2e-smoke-test-local.json` is intentionally ignored by Git and should not be committed.
 
 ## Why `full` Is Not the Default
 

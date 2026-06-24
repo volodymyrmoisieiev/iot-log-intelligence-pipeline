@@ -5,6 +5,8 @@ This service consumes JSON messages from Kafka topic `iot_raw_logs`, validates a
 - valid records to `iot_processed_logs`
 - invalid records to `iot_invalid_logs`
 
+For the final Stage 22 progress, batching, benchmark, and cleanup runbook, see [docs/stage-22-progress-and-loader-optimization.md](../docs/stage-22-progress-and-loader-optimization.md).
+
 ## Environment variables
 
 - `KAFKA_BOOTSTRAP_SERVERS` - Kafka brokers, default `kafka:9092`
@@ -38,6 +40,8 @@ docker compose run --build --rm `
 Runtime behavior:
 
 - logs a startup line with brokers, topics, group id, max messages, idle timeout, and progress interval
+- shows a `tqdm` progress bar when `tqdm` is installed and the process is attached to a real terminal
+- falls back to regular interval-based logs when `tqdm` is unavailable or output is being captured
 - logs progress every `CONSUMER_PROGRESS_INTERVAL` consumed messages
 - exits clearly if no messages arrive before the idle timeout
 - prints a final summary with `consumed`, `processed`, `invalid`, `failed`, `max_messages`, and `group_id`

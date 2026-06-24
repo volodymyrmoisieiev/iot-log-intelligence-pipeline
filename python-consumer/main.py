@@ -3,6 +3,7 @@ import time
 
 from config import load_config
 from consumer import RawLogConsumer
+from progress import ProgressReporter
 from producer import TopicProducer
 from validator import build_invalid_record, validate_message
 
@@ -24,6 +25,13 @@ def main() -> int:
     failed_count = 0
     consumed_count = 0
     last_message_at = time.monotonic()
+    progress = ProgressReporter(
+        logger=logger,
+        component_name="consumer",
+        interval=config.consumer_progress_interval,
+        total=config.consumer_max_messages,
+        unit="msg",
+    )
 
     logger.info(
         "starting python consumer brokers=%s raw_topic=%s processed_topic=%s invalid_topic=%s group_id=%s max_messages=%s idle_timeout_seconds=%s progress_interval=%s",
@@ -68,7 +76,7 @@ def main() -> int:
                 try:
                     producer.publish_processed(validation.normalized_record)
                     processed_count += 1
-                    logger.info(
+                    logger.debug(
                         "published valid record to processed topic device_id=%s count=%s",
                         validation.normalized_record.get("device_id"),
                         processed_count,
@@ -76,22 +84,20 @@ def main() -> int:
                 except Exception as exc:
                     failed_count += 1
                     logger.exception("failed to publish valid record: %s", exc)
-                if consumed_count % config.consumer_progress_interval == 0:
-                    logger.info(
-                        "consumer progress consumed=%s processed=%s invalid=%s failed=%s group_id=%s",
-                        consumed_count,
-                        processed_count,
-                        invalid_count,
-                        failed_count,
-                        config.consumer_group_id,
-                    )
+                progress.update(
+                    consumed_count,
+                    processed=processed_count,
+                    invalid=invalid_count,
+                    failed=failed_count,
+                    group_id=config.consumer_group_id,
+                )
                 continue
 
             invalid_record = build_invalid_record(message_value, validation.error_reason or "unknown validation error")
             try:
                 producer.publish_invalid(invalid_record)
                 invalid_count += 1
-                logger.info(
+                logger.debug(
                     "published invalid record to invalid topic reason=%s count=%s",
                     invalid_record["error_reason"],
                     invalid_count,
@@ -99,18 +105,17 @@ def main() -> int:
             except Exception as exc:
                 failed_count += 1
                 logger.exception("failed to publish invalid record: %s", exc)
-            if consumed_count % config.consumer_progress_interval == 0:
-                logger.info(
-                    "consumer progress consumed=%s processed=%s invalid=%s failed=%s group_id=%s",
-                    consumed_count,
-                    processed_count,
-                    invalid_count,
-                    failed_count,
-                    config.consumer_group_id,
-                )
+            progress.update(
+                consumed_count,
+                processed=processed_count,
+                invalid=invalid_count,
+                failed=failed_count,
+                group_id=config.consumer_group_id,
+            )
     finally:
         consumer.close()
         producer.close()
+        progress.close()
         logger.info(
             "consumer summary consumed=%s processed=%s invalid=%s failed=%s max_messages=%s group_id=%s",
             consumed_count,
