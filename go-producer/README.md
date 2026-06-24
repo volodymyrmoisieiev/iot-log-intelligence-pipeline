@@ -6,6 +6,8 @@ By default it still uses the tracked sample dataset:
 
 `data/samples/sample_iot_logs.csv`
 
+For the final Stage 22 progress, batching, benchmark, and cleanup runbook, see [docs/stage-22-progress-and-loader-optimization.md](../docs/stage-22-progress-and-loader-optimization.md).
+
 ## Environment variables
 
 - `KAFKA_BOOTSTRAP_SERVERS` - Kafka brokers, for example `kafka:9092` in Docker or `localhost:29092` locally

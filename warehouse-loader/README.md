@@ -2,6 +2,8 @@
 
 This service consumes validated Kafka messages from `iot_processed_logs` and invalid messages from `iot_invalid_logs`, then loads them into PostgreSQL tables `processed_iot_logs` and `invalid_iot_logs`.
 
+For the final Stage 22 progress, batching, benchmark, and cleanup runbook, see [docs/stage-22-progress-and-loader-optimization.md](../docs/stage-22-progress-and-loader-optimization.md).
+
 ## Environment variables
 
 - `KAFKA_BOOTSTRAP_SERVERS` - Kafka brokers, default `kafka:9092`

@@ -5,6 +5,8 @@ This service consumes JSON messages from Kafka topic `iot_raw_logs`, validates a
 - valid records to `iot_processed_logs`
 - invalid records to `iot_invalid_logs`
 
+For the final Stage 22 progress, batching, benchmark, and cleanup runbook, see [docs/stage-22-progress-and-loader-optimization.md](../docs/stage-22-progress-and-loader-optimization.md).
+
 ## Environment variables
 
 - `KAFKA_BOOTSTRAP_SERVERS` - Kafka brokers, default `kafka:9092`

@@ -20,6 +20,8 @@ The script lives at `scripts/run_local_e2e_smoke_test.py` and uses only the Pyth
 
 For the final Stage 21 runbook, validated full-run summary, bottleneck notes, and PR-ready cleanup guidance, see [docs/stage-21-local-e2e-validation.md](docs/stage-21-local-e2e-validation.md).
 
+For the final Stage 22 progress, batching, and full-benchmark runbook, see [docs/stage-22-progress-and-loader-optimization.md](docs/stage-22-progress-and-loader-optimization.md).
+
 ## Why This Is Not a Full Dataset Run
 
 The smoke test keeps `sample` as the default profile and caps row-oriented dataset checks with `--max-rows` so normal local validation stays fast, predictable, and inexpensive.
