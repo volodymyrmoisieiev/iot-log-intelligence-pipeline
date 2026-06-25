@@ -104,6 +104,39 @@ class CommandExecutionResult:
     streamed_output: bool
 
 
+@dataclass(frozen=True)
+class ConcurrentProcessSpec:
+    name: str
+    command: list[str]
+    cwd: Path
+    env: dict[str, str] | None = None
+
+
+@dataclass
+class ConcurrentProcessHandle:
+    spec: ConcurrentProcessSpec
+    process: subprocess.Popen[str]
+    start_time: float
+    stream_output: bool
+    stdout_path: Path | None = None
+    stderr_path: Path | None = None
+    stdout_handle: Any | None = None
+    stderr_handle: Any | None = None
+    terminated_by_orchestrator: bool = False
+    termination_reason: str | None = None
+
+
+@dataclass(frozen=True)
+class ConcurrentProcessResult:
+    name: str
+    return_code: int | None
+    duration_seconds: float
+    stdout_excerpt: str | None
+    stderr_excerpt: str | None
+    terminated_by_orchestrator: bool
+    termination_reason: str | None
+
+
 @dataclass
 class CheckResult:
     name: str
@@ -531,6 +564,168 @@ def run_process(
     )
 
 
+def start_concurrent_process(
+    spec: ConcurrentProcessSpec,
+    *,
+    stream_output: bool,
+) -> ConcurrentProcessHandle:
+    stdout_handle: Any | None = None
+    stderr_handle: Any | None = None
+    stdout_path: Path | None = None
+    stderr_path: Path | None = None
+
+    if not stream_output:
+        stdout_file = tempfile.NamedTemporaryFile(suffix=".log", delete=False)
+        stderr_file = tempfile.NamedTemporaryFile(suffix=".log", delete=False)
+        stdout_path = Path(stdout_file.name)
+        stderr_path = Path(stderr_file.name)
+        stdout_file.close()
+        stderr_file.close()
+        stdout_handle = stdout_path.open("w", encoding="utf-8")
+        stderr_handle = stderr_path.open("w", encoding="utf-8")
+
+    try:
+        process = subprocess.Popen(
+            spec.command,
+            cwd=spec.cwd,
+            env=spec.env,
+            stdout=None if stream_output else stdout_handle,
+            stderr=None if stream_output else stderr_handle,
+            text=True,
+        )
+    except Exception:
+        if stdout_handle is not None:
+            stdout_handle.close()
+        if stderr_handle is not None:
+            stderr_handle.close()
+        if stdout_path is not None:
+            stdout_path.unlink(missing_ok=True)
+        if stderr_path is not None:
+            stderr_path.unlink(missing_ok=True)
+        raise
+
+    return ConcurrentProcessHandle(
+        spec=spec,
+        process=process,
+        start_time=time.time(),
+        stream_output=stream_output,
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
+        stdout_handle=stdout_handle,
+        stderr_handle=stderr_handle,
+    )
+
+
+def terminate_concurrent_processes(
+    handles: list[ConcurrentProcessHandle],
+    *,
+    reason: str,
+    wait_seconds: float = 3.0,
+) -> None:
+    running_handles = [handle for handle in handles if handle.process.poll() is None]
+    if not running_handles:
+        return
+
+    for handle in running_handles:
+        handle.terminated_by_orchestrator = True
+        handle.termination_reason = reason
+        try:
+            handle.process.terminate()
+        except ProcessLookupError:
+            continue
+
+    deadline = time.monotonic() + wait_seconds
+    for handle in running_handles:
+        remaining = max(0.0, deadline - time.monotonic())
+        try:
+            handle.process.wait(timeout=remaining)
+        except subprocess.TimeoutExpired:
+            try:
+                handle.process.kill()
+                handle.process.wait(timeout=1.0)
+            except (ProcessLookupError, subprocess.TimeoutExpired):
+                continue
+
+
+def collect_concurrent_process_result(
+    handle: ConcurrentProcessHandle,
+) -> ConcurrentProcessResult:
+    if handle.process.poll() is None:
+        handle.process.wait()
+
+    if handle.stdout_handle is not None and not handle.stdout_handle.closed:
+        handle.stdout_handle.close()
+    if handle.stderr_handle is not None and not handle.stderr_handle.closed:
+        handle.stderr_handle.close()
+
+    stdout_text: str | None
+    stderr_text: str | None
+    if handle.stream_output:
+        stdout_text = "streamed to terminal"
+        stderr_text = "streamed to terminal"
+    else:
+        stdout_text = read_text_if_exists(handle.stdout_path) if handle.stdout_path else None
+        stderr_text = read_text_if_exists(handle.stderr_path) if handle.stderr_path else None
+
+    if handle.stdout_path is not None:
+        handle.stdout_path.unlink(missing_ok=True)
+    if handle.stderr_path is not None:
+        handle.stderr_path.unlink(missing_ok=True)
+
+    return ConcurrentProcessResult(
+        name=handle.spec.name,
+        return_code=handle.process.returncode,
+        duration_seconds=round(time.time() - handle.start_time, 3),
+        stdout_excerpt=shorten_output(stdout_text),
+        stderr_excerpt=shorten_output(stderr_text),
+        terminated_by_orchestrator=handle.terminated_by_orchestrator,
+        termination_reason=handle.termination_reason,
+    )
+
+
+def wait_for_concurrent_processes(
+    handles: list[ConcurrentProcessHandle],
+    *,
+    required_process_names: set[str] | None = None,
+    poll_interval_seconds: float = 0.2,
+    termination_wait_seconds: float = 3.0,
+) -> list[ConcurrentProcessResult]:
+    if required_process_names is None:
+        required_process_names = {handle.spec.name for handle in handles}
+
+    completed_process_names: set[str] = set()
+    failure_reason: str | None = None
+
+    while len(completed_process_names) < len(handles):
+        for handle in handles:
+            if handle.spec.name in completed_process_names:
+                continue
+
+            return_code = handle.process.poll()
+            if return_code is None:
+                continue
+
+            completed_process_names.add(handle.spec.name)
+            if return_code != 0 and handle.spec.name in required_process_names:
+                failure_reason = (
+                    f"terminated because required process '{handle.spec.name}' exited "
+                    f"with code {return_code}"
+                )
+                terminate_concurrent_processes(
+                    handles,
+                    reason=failure_reason,
+                    wait_seconds=termination_wait_seconds,
+                )
+                break
+
+        if failure_reason is not None:
+            break
+
+        time.sleep(poll_interval_seconds)
+
+    return [collect_concurrent_process_result(handle) for handle in handles]
+
+
 def run_command_sequence(
     *,
     name: str,
@@ -764,6 +959,9 @@ def run_concurrent_profile_pipeline(
     stream_output: bool,
     progress_mode: str,
 ) -> list[CheckResult]:
+    # Stage 23C adds reusable Popen-based concurrent process helpers,
+    # but Stage 23D will wire those helpers into the real producer,
+    # consumer, and warehouse-loader runtime orchestration path.
     expected_rows = count_bounded_dataset_rows(dataset_path=dataset_path, max_rows=max_rows)
     context = create_pipeline_runtime_context(
         profile_name=profile_name,
@@ -791,12 +989,12 @@ def run_concurrent_profile_pipeline(
     status = "dry_run" if dry_run else "failed"
     details = (
         f"Would prepare the controlled {profile_name} profile pipeline in concurrent mode, "
-        "but Stage 23C will implement the actual parallel process orchestration."
+        "but Stage 23D will wire the actual parallel process orchestration into the runtime flow."
         if dry_run
         else (
             f"Concurrent profile pipeline mode was requested for the controlled {profile_name} "
-            "runtime flow, but Stage 23C has not implemented the actual parallel process "
-            "orchestration yet."
+            "runtime flow, but Stage 23D has not wired the actual parallel process "
+            "orchestration into the producer/consumer/warehouse-loader path yet."
         )
     )
     return [

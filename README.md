@@ -689,7 +689,7 @@ For the focused Stage 20 guide and expansion roadmap, see [docs/ci-quality-gates
 
 Stage 21D keeps the safe local smoke-test entry point at `scripts/run_local_e2e_smoke_test.py`, preserves `--run-profile-pipeline` plus the backward-compatible `--run-sample-pipeline` alias, adds controlled full-profile runtime validation behind `--allow-full-run`, and updates the focused runbook at [docs/local-e2e-smoke-test.md](docs/local-e2e-smoke-test.md).
 
-Stage 23B now adds the opt-in `--concurrent-pipeline` CLI foundation for a future local concurrent runtime mode. Sequential execution remains the default behavior, and the full consumer-plus-loader-plus-producer concurrent orchestration is intentionally deferred to the next Stage 23 step rather than being silently simulated.
+Stage 23B now adds the opt-in `--concurrent-pipeline` CLI foundation for a future local concurrent runtime mode. Stage 23C builds on that by adding internal `Popen`-based concurrent process-management helpers inside the smoke-test script, while sequential execution remains the default behavior and the full consumer-plus-loader-plus-producer concurrent runtime wiring is still intentionally deferred to Stage 23D rather than being silently simulated.
 
 For the final Stage 21 runbook, validated full-run example, cleanup guidance, and follow-up ideas, see [docs/stage-21-local-e2e-validation.md](docs/stage-21-local-e2e-validation.md).
 
@@ -716,7 +716,7 @@ Recommended sample-safe commands:
 .\.venv-observability\Scripts\python.exe .\scripts\run_local_e2e_smoke_test.py --profile full --max-rows 100000 --run-profile-pipeline --allow-full-run --output-json docs/e2e-smoke-test-local.json
 ```
 
-Stage 21D still keeps the default flow sample-safe and bounded. Full dataset validation now exists, but it remains an explicit opt-in path rather than the default local behavior here. The new `--concurrent-pipeline` flag is also opt-in only and currently acts as a Stage 23 foundation that reports the intended future mode without enabling real parallel runtime orchestration yet.
+Stage 21D still keeps the default flow sample-safe and bounded. Full dataset validation now exists, but it remains an explicit opt-in path rather than the default local behavior here. The new `--concurrent-pipeline` flag is also opt-in only and currently acts as a Stage 23 foundation that reports the intended future mode without enabling real parallel runtime orchestration yet, even though Stage 23C now includes the internal process runner helpers that Stage 23D will use.
 
 ## 22. Stage 9A PySpark batch processing foundation
 
