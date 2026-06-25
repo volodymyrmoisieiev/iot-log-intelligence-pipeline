@@ -7,7 +7,7 @@ There are now four related local validation modes:
 - `dry-run` checks which smoke-test commands would execute and writes that plan into the JSON summary without running the external command steps
 - the default smoke test validates repository structure, selected dataset availability, Docker Compose config, Python syntax, Terraform validation, data-contract validation, and optional read-only anomaly detection without starting the full local pipeline
 - `--run-profile-pipeline` adds a controlled profile-specific runtime E2E pass that starts only the required local services, uses bounded row/message limits, and verifies PostgreSQL row-count deltas after producer, consumer, and warehouse-loader execution
-- `--concurrent-pipeline` is a Stage 23 foundation flag for a future opt-in runtime mode that will later run consumer, warehouse-loader, and producer at the same time; Stage 23C now adds internal process-management helpers, while the real runtime wiring is still not implemented yet
+- `--concurrent-pipeline` is an opt-in Stage 23 runtime mode that now starts consumer, warehouse-loader, and producer through the local E2E helper in a minimal concurrent flow while preserving sequential mode as the default
 - `--stream-output` switches manual runtime runs from captured/report mode to live terminal streaming so progress logs or `tqdm` can be seen directly
 
 `--run-sample-pipeline` is still supported as a backward-compatible alias for `--profile sample --run-profile-pipeline`.
@@ -94,7 +94,7 @@ What this mode adds:
 - reruns bounded data-contract validation
 - attempts anomaly detection in safe read-only mode and records either a result or an explicit `skip`
 
-Sequential mode remains the default Stage 23 behavior. If you add `--concurrent-pipeline`, the helper now switches the JSON/report metadata to `pipeline_execution_mode=concurrent`, and Stage 23C provides internal `Popen`-based process-management helpers for the future concurrent runtime path. The real producer-plus-consumer-plus-loader wiring is intentionally deferred to Stage 23D instead of being silently simulated.
+Sequential mode remains the default Stage 23 behavior. If you add `--concurrent-pipeline`, the helper switches the JSON/report metadata to `pipeline_execution_mode=concurrent`, starts the Python consumer first, starts the warehouse loader second, waits briefly for warm-up, and starts the Go producer last.
 
 Concurrent Stage 23 foundation example:
 
@@ -102,10 +102,10 @@ Concurrent Stage 23 foundation example:
 .\.venv-observability\Scripts\python.exe .\scripts\run_local_e2e_smoke_test.py --profile sample --max-rows 1000 --run-profile-pipeline --concurrent-pipeline --output-json docs/e2e-smoke-test-local.json
 ```
 
-Current Stage 23C expectation:
+Current Stage 23D1 expectation:
 
 - the command should parse and run safely
-- the summary should clearly report that concurrent runtime orchestration is not implemented yet
+- the summary should report a real concurrent runtime result
 - the JSON summary should record `pipeline_execution_mode` as `concurrent`
 - the existing sequential path remains the default when `--concurrent-pipeline` is not used
 
