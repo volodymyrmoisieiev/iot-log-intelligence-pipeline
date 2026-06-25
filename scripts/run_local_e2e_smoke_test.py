@@ -763,6 +763,22 @@ def make_concurrent_process_check_result(
     )
 
 
+def summarize_concurrent_process_results(
+    process_results: list[ConcurrentProcessResult],
+) -> dict[str, Any]:
+    process_summary: dict[str, Any] = {}
+    for process_result in process_results:
+        component_name = process_result.name.removeprefix("profile_pipeline_")
+        process_summary[component_name] = {
+            "status": "passed" if process_result.return_code == 0 else "failed",
+            "return_code": process_result.return_code,
+            "duration_seconds": process_result.duration_seconds,
+            "terminated_by_orchestrator": process_result.terminated_by_orchestrator,
+            "termination_reason": process_result.termination_reason,
+        }
+    return process_summary
+
+
 def run_command_sequence(
     *,
     name: str,
@@ -1310,6 +1326,7 @@ def run_concurrent_profile_pipeline(
     handles: list[ConcurrentProcessHandle] = []
     metadata_by_name: dict[str, dict[str, Any]] = {}
     command_by_name: dict[str, list[str]] = {}
+    concurrent_runtime_started_at = time.time()
     try:
         for index, (_, spec, metadata) in enumerate(process_specs):
             handle = start_concurrent_process(spec, stream_output=stream_output)
@@ -1347,6 +1364,10 @@ def run_concurrent_profile_pipeline(
         return results
 
     process_results = wait_for_concurrent_processes(handles)
+    total_concurrent_wall_clock_duration_seconds = round(
+        time.time() - concurrent_runtime_started_at, 3
+    )
+    concurrent_process_summary = summarize_concurrent_process_results(process_results)
     process_failed = False
     failed_process_names: list[str] = []
     for process_result in process_results:
@@ -1383,6 +1404,8 @@ def run_concurrent_profile_pipeline(
             metadata={
                 **context,
                 "failed_process_names": failed_process_names,
+                "total_wall_clock_duration_seconds": total_concurrent_wall_clock_duration_seconds,
+                "processes": concurrent_process_summary,
             },
         )
     )
@@ -2443,6 +2466,21 @@ def extract_profile_pipeline_progress(results: list[CheckResult]) -> dict[str, A
     return progress or None
 
 
+def extract_concurrent_runtime_summary(results: list[CheckResult]) -> dict[str, Any] | None:
+    for result in results:
+        if result.name == "profile_pipeline_concurrent_runtime" and result.metadata:
+            return {
+                "status": result.status,
+                "details": result.details,
+                "total_wall_clock_duration_seconds": result.metadata.get(
+                    "total_wall_clock_duration_seconds"
+                ),
+                "failed_process_names": result.metadata.get("failed_process_names", []),
+                "processes": result.metadata.get("processes", {}),
+            }
+    return None
+
+
 def print_human_summary(
     *,
     profile_name: str,
@@ -2476,6 +2514,7 @@ def build_output_payload(
         run_profile_pipeline=args.run_profile_pipeline,
     )
     profile_pipeline_progress = extract_profile_pipeline_progress(results)
+    concurrent_runtime_summary = extract_concurrent_runtime_summary(results)
     return {
         "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "project_root": str(PROJECT_ROOT),
@@ -2512,6 +2551,7 @@ def build_output_payload(
         "summary": summary,
         "stage_durations_seconds": stage_durations,
         "profile_pipeline_progress": profile_pipeline_progress,
+        "profile_pipeline_concurrent_runtime": concurrent_runtime_summary,
         "checks": [asdict(result) for result in results],
     }
 

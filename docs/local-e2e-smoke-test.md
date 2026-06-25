@@ -102,12 +102,14 @@ Concurrent Stage 23 foundation example:
 .\.venv-observability\Scripts\python.exe .\scripts\run_local_e2e_smoke_test.py --profile sample --max-rows 1000 --run-profile-pipeline --concurrent-pipeline --output-json docs/e2e-smoke-test-local.json
 ```
 
-Current Stage 23D1 expectation:
+Current Stage 23D2 expectation:
 
 - the command should parse and run safely
 - the summary should report a real concurrent runtime result
 - the JSON summary should record `pipeline_execution_mode` as `concurrent`
 - the existing sequential path remains the default when `--concurrent-pipeline` is not used
+- the concurrent runtime starts consumer first, warehouse loader second, then producer after a short warm-up
+- the JSON summary now includes a dedicated `profile_pipeline_concurrent_runtime` section with per-process status, return code, duration, and orchestrator-termination details when concurrent mode is used
 
 How progress is displayed in this mode:
 
@@ -129,6 +131,7 @@ Why `tqdm` is hidden in captured mode:
 When you want live manual progress:
 
 - add `--stream-output` so producer, consumer, and loader output is sent directly to your terminal
+- prefer `--stream-output --progress-mode log` for live manual concurrent runs so three processes do not compete to redraw progress bars at the same time
 - use `--progress-mode tqdm` if you want the helper to switch live stream mode into the cleaner custom bar display for all three pipeline stages
 - use `--progress-mode bar` if you want to request that custom live progress-bar mode explicitly
 - use `--progress-mode log` if you want plain interval-based logs even in a real terminal

@@ -689,7 +689,7 @@ For the focused Stage 20 guide and expansion roadmap, see [docs/ci-quality-gates
 
 Stage 21D keeps the safe local smoke-test entry point at `scripts/run_local_e2e_smoke_test.py`, preserves `--run-profile-pipeline` plus the backward-compatible `--run-sample-pipeline` alias, adds controlled full-profile runtime validation behind `--allow-full-run`, and updates the focused runbook at [docs/local-e2e-smoke-test.md](docs/local-e2e-smoke-test.md).
 
-Stage 23B adds the opt-in `--concurrent-pipeline` CLI foundation for a local concurrent runtime mode, and Stage 23D1 now wires a minimal real concurrent E2E path on top of the Stage 23C `Popen`-based process-management helpers. Sequential execution remains the default behavior, while concurrent mode now starts consumer first, warehouse loader second, then producer after a short warm-up.
+Stage 23B adds the opt-in `--concurrent-pipeline` CLI foundation for a local concurrent runtime mode, and Stage 23D1 now wires a minimal real concurrent E2E path on top of the Stage 23C `Popen`-based process-management helpers. Sequential execution remains the default behavior, while concurrent mode starts consumer first, warehouse loader second, then producer after a short warm-up and records per-process runtime details in the JSON summary.
 
 For the final Stage 21 runbook, validated full-run example, cleanup guidance, and follow-up ideas, see [docs/stage-21-local-e2e-validation.md](docs/stage-21-local-e2e-validation.md).
 
