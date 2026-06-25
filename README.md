@@ -689,6 +689,10 @@ For the focused Stage 20 guide and expansion roadmap, see [docs/ci-quality-gates
 
 Stage 21D keeps the safe local smoke-test entry point at `scripts/run_local_e2e_smoke_test.py`, preserves `--run-profile-pipeline` plus the backward-compatible `--run-sample-pipeline` alias, adds controlled full-profile runtime validation behind `--allow-full-run`, and updates the focused runbook at [docs/local-e2e-smoke-test.md](docs/local-e2e-smoke-test.md).
 
+Stage 23B adds the opt-in `--concurrent-pipeline` CLI foundation for a local concurrent runtime mode, and Stage 23D1 now wires a minimal real concurrent E2E path on top of the Stage 23C `Popen`-based process-management helpers. Sequential execution remains the default behavior, while concurrent mode starts consumer first, warehouse loader second, then producer after a short warm-up and records per-process runtime details in the JSON summary.
+
+For the final Stage 23 runbook, concurrent command examples, failure-handling notes, and validation summary, see [docs/stage-23-concurrent-streaming-e2e-runtime.md](docs/stage-23-concurrent-streaming-e2e-runtime.md).
+
 For the final Stage 21 runbook, validated full-run example, cleanup guidance, and follow-up ideas, see [docs/stage-21-local-e2e-validation.md](docs/stage-21-local-e2e-validation.md).
 
 What this stage provides:
@@ -698,6 +702,7 @@ What this stage provides:
 - dataset preflight reporting for resolved path, existence, and available row count
 - stronger full-profile preflight that fails clearly when the full dataset is missing or smaller than the requested bounded row count
 - JSON result reporting for repository structure, dataset selection, Docker Compose config, Python syntax, Terraform validation, data-contract validation, and optional read-only anomaly detection
+- execution-mode reporting through `pipeline_execution_mode`, with `sequential` as the default and `concurrent` reserved for the new Stage 23 foundation flag
 - stage-duration reporting for data contract validation, producer, consumer, warehouse loader, PostgreSQL verification, and anomaly detection
 - an optional controlled sample, medium, or full runtime E2E pass that starts required local services, runs producer/consumer/warehouse-loader with matching bounded limits, and verifies PostgreSQL row-count deltas
 - explicit safety rails that avoid starting the full Kafka/PostgreSQL pipeline, avoid AWS deployment, and avoid `terraform apply`
@@ -708,11 +713,12 @@ Recommended sample-safe commands:
 .\.venv-observability\Scripts\python.exe .\scripts\run_local_e2e_smoke_test.py --profile sample --max-rows 1000 --dry-run --output-json docs/e2e-smoke-test-local.json
 .\.venv-observability\Scripts\python.exe .\scripts\run_local_e2e_smoke_test.py --profile sample --max-rows 1000 --output-json docs/e2e-smoke-test-local.json
 .\.venv-observability\Scripts\python.exe .\scripts\run_local_e2e_smoke_test.py --profile sample --max-rows 1000 --run-profile-pipeline --output-json docs/e2e-smoke-test-local.json
+.\.venv-observability\Scripts\python.exe .\scripts\run_local_e2e_smoke_test.py --profile sample --max-rows 1000 --run-profile-pipeline --concurrent-pipeline --output-json docs/e2e-smoke-test-local.json
 .\.venv-observability\Scripts\python.exe .\scripts\run_local_e2e_smoke_test.py --profile medium --max-rows 10000 --run-profile-pipeline --output-json docs/e2e-smoke-test-local.json
 .\.venv-observability\Scripts\python.exe .\scripts\run_local_e2e_smoke_test.py --profile full --max-rows 100000 --run-profile-pipeline --allow-full-run --output-json docs/e2e-smoke-test-local.json
 ```
 
-Stage 21D still keeps the default flow sample-safe and bounded. Full dataset validation now exists, but it remains an explicit opt-in path rather than the default local behavior here.
+Stage 21D still keeps the default flow sample-safe and bounded. Full dataset validation now exists, but it remains an explicit opt-in path rather than the default local behavior here. The `--concurrent-pipeline` flag is also opt-in only, and it now runs a minimal real concurrent local E2E path on top of the Stage 23 process runner helpers without replacing the default sequential flow.
 
 ## 22. Stage 9A PySpark batch processing foundation
 
