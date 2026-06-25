@@ -30,6 +30,8 @@ DEFAULT_POSTGRES_USER = "iot_user"
 DEFAULT_POSTGRES_PASSWORD = "iot_password"
 DEFAULT_PROGRESS_INTERVAL = 1000
 DEFAULT_WAREHOUSE_LOADER_BATCH_SIZE = 1000
+CONCURRENT_PIPELINE_IDLE_TIMEOUT_SECONDS = 30
+CONCURRENT_PIPELINE_WARMUP_SECONDS = 2.0
 KAFKA_TOPIC_TOOL_PATH = "/opt/kafka/bin/kafka-topics.sh"
 PROGRESS_MODE_CHOICES = ("auto", "log", "tqdm", "bar")
 
@@ -104,6 +106,39 @@ class CommandExecutionResult:
     streamed_output: bool
 
 
+@dataclass(frozen=True)
+class ConcurrentProcessSpec:
+    name: str
+    command: list[str]
+    cwd: Path
+    env: dict[str, str] | None = None
+
+
+@dataclass
+class ConcurrentProcessHandle:
+    spec: ConcurrentProcessSpec
+    process: subprocess.Popen[str]
+    start_time: float
+    stream_output: bool
+    stdout_path: Path | None = None
+    stderr_path: Path | None = None
+    stdout_handle: Any | None = None
+    stderr_handle: Any | None = None
+    terminated_by_orchestrator: bool = False
+    termination_reason: str | None = None
+
+
+@dataclass(frozen=True)
+class ConcurrentProcessResult:
+    name: str
+    return_code: int | None
+    duration_seconds: float
+    stdout_excerpt: str | None
+    stderr_excerpt: str | None
+    terminated_by_orchestrator: bool
+    termination_reason: str | None
+
+
 @dataclass
 class CheckResult:
     name: str
@@ -159,6 +194,14 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help=(
             "Backward-compatible alias for --run-profile-pipeline when --profile sample is used."
+        ),
+    )
+    parser.add_argument(
+        "--concurrent-pipeline",
+        action="store_true",
+        help=(
+            "Prepare for a future concurrent profile pipeline mode where consumer, "
+            "warehouse-loader, and producer run at the same time."
         ),
     )
     parser.add_argument(
@@ -248,6 +291,10 @@ def ensure_args_are_valid(args: argparse.Namespace) -> None:
         raise SmokeTestConfigurationError(
             "--run-sample-pipeline is a backward-compatible alias for the sample profile only. "
             "Use --run-profile-pipeline for medium or future profile runtime checks."
+        )
+    if args.concurrent_pipeline and not args.run_profile_pipeline:
+        raise SmokeTestConfigurationError(
+            "--concurrent-pipeline requires --run-profile-pipeline."
         )
     if args.run_profile_pipeline and args.profile == "full" and not args.allow_full_run:
         raise SmokeTestConfigurationError(
@@ -426,7 +473,16 @@ def choose_progress_interval(expected_rows: int) -> int:
     return max(1, min(DEFAULT_PROGRESS_INTERVAL, expected_rows))
 
 
-def create_pipeline_runtime_context(profile_name: str, max_rows: int) -> dict[str, Any]:
+def determine_pipeline_execution_mode(*, concurrent_pipeline: bool) -> str:
+    return "concurrent" if concurrent_pipeline else "sequential"
+
+
+def create_pipeline_runtime_context(
+    profile_name: str,
+    max_rows: int,
+    *,
+    pipeline_execution_mode: str,
+) -> dict[str, Any]:
     runtime_id = build_runtime_id(f"stage21c-{profile_name}")
     topic_suffix = runtime_id.replace("-", "_")
     raw_topic = f"iot_raw_logs_{topic_suffix}"
@@ -436,6 +492,7 @@ def create_pipeline_runtime_context(profile_name: str, max_rows: int) -> dict[st
     return {
         "runtime_id": runtime_id,
         "profile": profile_name,
+        "pipeline_execution_mode": pipeline_execution_mode,
         "raw_topic": raw_topic,
         "processed_topic": processed_topic,
         "invalid_topic": invalid_topic,
@@ -507,6 +564,219 @@ def run_process(
         stderr_text=result.stderr,
         streamed_output=False,
     )
+
+
+def start_concurrent_process(
+    spec: ConcurrentProcessSpec,
+    *,
+    stream_output: bool,
+) -> ConcurrentProcessHandle:
+    stdout_handle: Any | None = None
+    stderr_handle: Any | None = None
+    stdout_path: Path | None = None
+    stderr_path: Path | None = None
+
+    if not stream_output:
+        stdout_file = tempfile.NamedTemporaryFile(suffix=".log", delete=False)
+        stderr_file = tempfile.NamedTemporaryFile(suffix=".log", delete=False)
+        stdout_path = Path(stdout_file.name)
+        stderr_path = Path(stderr_file.name)
+        stdout_file.close()
+        stderr_file.close()
+        stdout_handle = stdout_path.open("w", encoding="utf-8")
+        stderr_handle = stderr_path.open("w", encoding="utf-8")
+
+    try:
+        process = subprocess.Popen(
+            spec.command,
+            cwd=spec.cwd,
+            env=spec.env,
+            stdout=None if stream_output else stdout_handle,
+            stderr=None if stream_output else stderr_handle,
+            text=True,
+        )
+    except Exception:
+        if stdout_handle is not None:
+            stdout_handle.close()
+        if stderr_handle is not None:
+            stderr_handle.close()
+        if stdout_path is not None:
+            stdout_path.unlink(missing_ok=True)
+        if stderr_path is not None:
+            stderr_path.unlink(missing_ok=True)
+        raise
+
+    return ConcurrentProcessHandle(
+        spec=spec,
+        process=process,
+        start_time=time.time(),
+        stream_output=stream_output,
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
+        stdout_handle=stdout_handle,
+        stderr_handle=stderr_handle,
+    )
+
+
+def terminate_concurrent_processes(
+    handles: list[ConcurrentProcessHandle],
+    *,
+    reason: str,
+    wait_seconds: float = 3.0,
+) -> None:
+    running_handles = [handle for handle in handles if handle.process.poll() is None]
+    if not running_handles:
+        return
+
+    for handle in running_handles:
+        handle.terminated_by_orchestrator = True
+        handle.termination_reason = reason
+        try:
+            handle.process.terminate()
+        except ProcessLookupError:
+            continue
+
+    deadline = time.monotonic() + wait_seconds
+    for handle in running_handles:
+        remaining = max(0.0, deadline - time.monotonic())
+        try:
+            handle.process.wait(timeout=remaining)
+        except subprocess.TimeoutExpired:
+            try:
+                handle.process.kill()
+                handle.process.wait(timeout=1.0)
+            except (ProcessLookupError, subprocess.TimeoutExpired):
+                continue
+
+
+def collect_concurrent_process_result(
+    handle: ConcurrentProcessHandle,
+) -> ConcurrentProcessResult:
+    if handle.process.poll() is None:
+        handle.process.wait()
+
+    if handle.stdout_handle is not None and not handle.stdout_handle.closed:
+        handle.stdout_handle.close()
+    if handle.stderr_handle is not None and not handle.stderr_handle.closed:
+        handle.stderr_handle.close()
+
+    stdout_text: str | None
+    stderr_text: str | None
+    if handle.stream_output:
+        stdout_text = "streamed to terminal"
+        stderr_text = "streamed to terminal"
+    else:
+        stdout_text = read_text_if_exists(handle.stdout_path) if handle.stdout_path else None
+        stderr_text = read_text_if_exists(handle.stderr_path) if handle.stderr_path else None
+
+    if handle.stdout_path is not None:
+        handle.stdout_path.unlink(missing_ok=True)
+    if handle.stderr_path is not None:
+        handle.stderr_path.unlink(missing_ok=True)
+
+    return ConcurrentProcessResult(
+        name=handle.spec.name,
+        return_code=handle.process.returncode,
+        duration_seconds=round(time.time() - handle.start_time, 3),
+        stdout_excerpt=shorten_output(stdout_text),
+        stderr_excerpt=shorten_output(stderr_text),
+        terminated_by_orchestrator=handle.terminated_by_orchestrator,
+        termination_reason=handle.termination_reason,
+    )
+
+
+def wait_for_concurrent_processes(
+    handles: list[ConcurrentProcessHandle],
+    *,
+    required_process_names: set[str] | None = None,
+    poll_interval_seconds: float = 0.2,
+    termination_wait_seconds: float = 3.0,
+) -> list[ConcurrentProcessResult]:
+    if required_process_names is None:
+        required_process_names = {handle.spec.name for handle in handles}
+
+    completed_process_names: set[str] = set()
+    failure_reason: str | None = None
+
+    while len(completed_process_names) < len(handles):
+        for handle in handles:
+            if handle.spec.name in completed_process_names:
+                continue
+
+            return_code = handle.process.poll()
+            if return_code is None:
+                continue
+
+            completed_process_names.add(handle.spec.name)
+            if return_code != 0 and handle.spec.name in required_process_names:
+                failure_reason = (
+                    f"terminated because required process '{handle.spec.name}' exited "
+                    f"with code {return_code}"
+                )
+                terminate_concurrent_processes(
+                    handles,
+                    reason=failure_reason,
+                    wait_seconds=termination_wait_seconds,
+                )
+                break
+
+        if failure_reason is not None:
+            break
+
+        time.sleep(poll_interval_seconds)
+
+    return [collect_concurrent_process_result(handle) for handle in handles]
+
+
+def make_concurrent_process_check_result(
+    *,
+    result: ConcurrentProcessResult,
+    command: list[str],
+    metadata: dict[str, Any],
+) -> CheckResult:
+    if result.return_code == 0:
+        details = f"Concurrent process '{result.name}' completed successfully."
+        if result.terminated_by_orchestrator and result.termination_reason:
+            details = (
+                f"Concurrent process '{result.name}' exited after orchestrator termination: "
+                f"{result.termination_reason}"
+            )
+    else:
+        details = f"Concurrent process '{result.name}' returned a non-zero exit code."
+        if result.terminated_by_orchestrator and result.termination_reason:
+            details = (
+                f"Concurrent process '{result.name}' was terminated by the orchestrator: "
+                f"{result.termination_reason}"
+            )
+
+    return CheckResult(
+        name=result.name,
+        status="passed" if result.return_code == 0 else "failed",
+        required=True,
+        details=details,
+        duration_seconds=result.duration_seconds,
+        command=command,
+        return_code=result.return_code,
+        stdout_excerpt=result.stdout_excerpt,
+        stderr_excerpt=result.stderr_excerpt,
+        metadata=metadata,
+    )
+
+
+def summarize_concurrent_process_results(
+    process_results: list[ConcurrentProcessResult],
+) -> dict[str, Any]:
+    process_summary: dict[str, Any] = {}
+    for process_result in process_results:
+        component_name = process_result.name.removeprefix("profile_pipeline_")
+        process_summary[component_name] = {
+            "status": "passed" if process_result.return_code == 0 else "failed",
+            "return_code": process_result.return_code,
+            "duration_seconds": process_result.duration_seconds,
+            "terminated_by_orchestrator": process_result.terminated_by_orchestrator,
+            "termination_reason": process_result.termination_reason,
+        }
+    return process_summary
 
 
 def run_command_sequence(
@@ -732,7 +1002,7 @@ def read_postgres_counts() -> tuple[CheckResult, dict[str, int] | None]:
     )
 
 
-def run_controlled_profile_pipeline(
+def run_concurrent_profile_pipeline(
     *,
     profile_name: str,
     dataset_path: Path,
@@ -743,7 +1013,471 @@ def run_controlled_profile_pipeline(
     progress_mode: str,
 ) -> list[CheckResult]:
     expected_rows = count_bounded_dataset_rows(dataset_path=dataset_path, max_rows=max_rows)
-    context = create_pipeline_runtime_context(profile_name=profile_name, max_rows=max_rows)
+    context = create_pipeline_runtime_context(
+        profile_name=profile_name,
+        max_rows=max_rows,
+        pipeline_execution_mode="concurrent",
+    )
+    progress_interval = choose_progress_interval(expected_rows)
+    context["resolved_dataset_path"] = str(dataset_path)
+    context["expected_dataset_rows"] = expected_rows
+    context["producer_progress_interval"] = progress_interval
+    context["consumer_progress_interval"] = progress_interval
+    context["warehouse_loader_progress_interval"] = progress_interval
+    context["warehouse_loader_batch_size"] = DEFAULT_WAREHOUSE_LOADER_BATCH_SIZE
+    effective_python_progress_mode = resolve_python_progress_mode(
+        stream_output=stream_output,
+        progress_mode=progress_mode,
+    )
+    context["python_progress_mode"] = normalize_progress_mode(effective_python_progress_mode)
+    context["producer_progress_mode"] = choose_producer_progress_mode(
+        stream_output=stream_output,
+        progress_mode=effective_python_progress_mode,
+    )
+    context["concurrent_pipeline_implemented"] = True
+    context["consumer_idle_timeout_seconds"] = CONCURRENT_PIPELINE_IDLE_TIMEOUT_SECONDS
+    context["warehouse_loader_idle_timeout_seconds"] = (
+        CONCURRENT_PIPELINE_IDLE_TIMEOUT_SECONDS
+    )
+    context["warmup_seconds"] = CONCURRENT_PIPELINE_WARMUP_SECONDS
+
+    if expected_rows == 0:
+        return [
+            make_result(
+                name="profile_pipeline_runtime",
+                status="failed",
+                required=True,
+                details=(
+                    f"The selected {profile_name} dataset has no data rows to exercise in runtime mode."
+                ),
+                metadata=context,
+            )
+        ]
+
+    results: list[CheckResult] = []
+    results.append(
+        run_command(
+            name="profile_pipeline_start_services",
+            command=["docker", "compose", "up", "-d", "kafka", "kafka-init", "postgres"],
+            required=True,
+            dry_run=dry_run,
+            success_detail=(
+                f"Started required Docker Compose services for the controlled {profile_name} concurrent runtime flow."
+            ),
+            dry_run_detail=(
+                f"Would start kafka, kafka-init, and postgres for the controlled {profile_name} concurrent runtime flow."
+            ),
+            stream_output=stream_output,
+            metadata=context,
+        )
+    )
+    if not dry_run and results[-1].status == "failed":
+        return results
+
+    topic_commands = [
+        [
+            "docker",
+            "compose",
+            "exec",
+            "-T",
+            "kafka",
+            KAFKA_TOPIC_TOOL_PATH,
+            "--bootstrap-server",
+            "localhost:9092",
+            "--create",
+            "--if-not-exists",
+            "--topic",
+            topic_name,
+            "--partitions",
+            "1",
+            "--replication-factor",
+            "1",
+        ]
+        for topic_name in (
+            context["raw_topic"],
+            context["processed_topic"],
+            context["invalid_topic"],
+        )
+    ]
+    results.append(
+        run_command_sequence(
+            name="profile_pipeline_create_topics",
+            commands=topic_commands,
+            required=True,
+            dry_run=dry_run,
+            success_detail=(
+                f"Created isolated Kafka topics for the controlled {profile_name} concurrent runtime flow."
+            ),
+            dry_run_detail=(
+                f"Would create isolated Kafka topics for raw, processed, and invalid {profile_name} concurrent runtime messages."
+            ),
+            stream_output=stream_output,
+            metadata={
+                **context,
+                "raw_topic": context["raw_topic"],
+                "processed_topic": context["processed_topic"],
+                "invalid_topic": context["invalid_topic"],
+            },
+        )
+    )
+    if not dry_run and results[-1].status == "failed":
+        return results
+
+    pre_counts_result, pre_counts = read_postgres_counts() if not dry_run else (
+        make_result(
+            name="profile_pipeline_pre_run_postgres_counts",
+            status="dry_run",
+            required=True,
+            details=(
+                f"Would capture PostgreSQL row counts before running the controlled {profile_name} concurrent pipeline."
+            ),
+            metadata=context,
+        ),
+        None,
+    )
+    pre_counts_result.name = "profile_pipeline_pre_run_postgres_counts"
+    results.append(pre_counts_result)
+    if not dry_run and results[-1].status == "failed":
+        return results
+
+    results.append(
+        run_command(
+            name="profile_pipeline_build_images",
+            command=["docker", "compose", "build", "go-producer", "python-consumer", "warehouse-loader"],
+            required=True,
+            dry_run=dry_run,
+            success_detail=(
+                "Built Go producer, Python consumer, and warehouse-loader images before the concurrent runtime flow."
+            ),
+            dry_run_detail=(
+                "Would build go-producer, python-consumer, and warehouse-loader images before the concurrent runtime flow."
+            ),
+            stream_output=stream_output,
+            metadata=context,
+        )
+    )
+    if not dry_run and results[-1].status == "failed":
+        return results
+
+    producer_command = [
+        "docker",
+        "compose",
+        "run",
+        "--rm",
+        "-e",
+        f"DATASET_PROFILE={profile_name}",
+        "-e",
+        f"KAFKA_RAW_TOPIC={context['raw_topic']}",
+        "-e",
+        f"PRODUCER_MAX_ROWS={expected_rows}",
+        "-e",
+        f"PRODUCER_PROGRESS_INTERVAL={context['producer_progress_interval']}",
+        "-e",
+        f"PRODUCER_PROGRESS_MODE={context['producer_progress_mode']}",
+        "-e",
+        "PRODUCER_SEND_DELAY_MS=0",
+        "go-producer",
+    ]
+    consumer_command = [
+        "docker",
+        "compose",
+        "run",
+        "--rm",
+        "-e",
+        f"KAFKA_RAW_TOPIC={context['raw_topic']}",
+        "-e",
+        f"KAFKA_PROCESSED_TOPIC={context['processed_topic']}",
+        "-e",
+        f"KAFKA_INVALID_TOPIC={context['invalid_topic']}",
+        "-e",
+        f"CONSUMER_GROUP_ID={context['consumer_group_id']}",
+        "-e",
+        f"CONSUMER_MAX_MESSAGES={expected_rows}",
+        "-e",
+        f"CONSUMER_IDLE_TIMEOUT_SECONDS={CONCURRENT_PIPELINE_IDLE_TIMEOUT_SECONDS}",
+        "-e",
+        f"CONSUMER_PROGRESS_INTERVAL={context['consumer_progress_interval']}",
+        "-e",
+        f"PYTHON_PROGRESS_MODE={effective_python_progress_mode}",
+        "python-consumer",
+    ]
+    loader_command = [
+        "docker",
+        "compose",
+        "run",
+        "--rm",
+        "-e",
+        f"KAFKA_PROCESSED_TOPIC={context['processed_topic']}",
+        "-e",
+        f"KAFKA_INVALID_TOPIC={context['invalid_topic']}",
+        "-e",
+        f"WAREHOUSE_LOADER_GROUP_ID={context['loader_group_id']}",
+        "-e",
+        f"WAREHOUSE_LOADER_MAX_MESSAGES={expected_rows}",
+        "-e",
+        f"WAREHOUSE_LOADER_IDLE_TIMEOUT_SECONDS={CONCURRENT_PIPELINE_IDLE_TIMEOUT_SECONDS}",
+        "-e",
+        f"WAREHOUSE_LOADER_PROGRESS_INTERVAL={context['warehouse_loader_progress_interval']}",
+        "-e",
+        f"WAREHOUSE_LOADER_BATCH_SIZE={context['warehouse_loader_batch_size']}",
+        "-e",
+        f"PYTHON_PROGRESS_MODE={effective_python_progress_mode}",
+        "warehouse-loader",
+    ]
+
+    if dry_run:
+        results.append(
+            make_result(
+                name="profile_pipeline_concurrent_runtime",
+                status="dry_run",
+                required=True,
+                details=(
+                    f"Would start the controlled {profile_name} concurrent runtime flow in this order: "
+                    "python-consumer, warehouse-loader, warm-up, then go-producer."
+                ),
+                metadata={
+                    **context,
+                    "process_start_order": [
+                        "profile_pipeline_consumer",
+                        "profile_pipeline_warehouse_loader",
+                        "profile_pipeline_producer",
+                    ],
+                    "commands": {
+                        "producer": producer_command,
+                        "consumer": consumer_command,
+                        "warehouse_loader": loader_command,
+                    },
+                },
+            )
+        )
+        results.append(
+            make_result(
+                name="profile_pipeline_verify_postgres_deltas",
+                status="dry_run",
+                required=True,
+                details=(
+                    f"Would compare PostgreSQL row-count deltas after the controlled {profile_name} concurrent runtime flow."
+                ),
+                metadata=context,
+            )
+        )
+        anomaly_result = run_anomaly_detection_check(
+            skip_anomaly_detection=skip_anomaly_detection,
+            max_rows=expected_rows,
+            dry_run=dry_run,
+            check_name="profile_pipeline_anomaly_detection_read_only",
+        )
+        results.append(anomaly_result)
+        return results
+
+    process_specs = [
+        (
+            "profile_pipeline_consumer",
+            ConcurrentProcessSpec(
+                name="profile_pipeline_consumer",
+                command=consumer_command,
+                cwd=PROJECT_ROOT,
+            ),
+            {
+                **context,
+                "component": "consumer",
+                "progress_interval": context["consumer_progress_interval"],
+                "progress_mode": normalize_progress_mode(effective_python_progress_mode),
+                "python_progress_mode": normalize_progress_mode(effective_python_progress_mode),
+                "idle_timeout_seconds": CONCURRENT_PIPELINE_IDLE_TIMEOUT_SECONDS,
+                "output_mode": "streamed" if stream_output else "captured",
+            },
+        ),
+        (
+            "profile_pipeline_warehouse_loader",
+            ConcurrentProcessSpec(
+                name="profile_pipeline_warehouse_loader",
+                command=loader_command,
+                cwd=PROJECT_ROOT,
+            ),
+            {
+                **context,
+                "component": "warehouse_loader",
+                "progress_interval": context["warehouse_loader_progress_interval"],
+                "batch_size": context["warehouse_loader_batch_size"],
+                "progress_mode": normalize_progress_mode(effective_python_progress_mode),
+                "python_progress_mode": normalize_progress_mode(effective_python_progress_mode),
+                "idle_timeout_seconds": CONCURRENT_PIPELINE_IDLE_TIMEOUT_SECONDS,
+                "output_mode": "streamed" if stream_output else "captured",
+            },
+        ),
+        (
+            "profile_pipeline_producer",
+            ConcurrentProcessSpec(
+                name="profile_pipeline_producer",
+                command=producer_command,
+                cwd=PROJECT_ROOT,
+            ),
+            {
+                **context,
+                "component": "producer",
+                "progress_interval": context["producer_progress_interval"],
+                "progress_mode": context["producer_progress_mode"],
+                "output_mode": "streamed" if stream_output else "captured",
+            },
+        ),
+    ]
+
+    handles: list[ConcurrentProcessHandle] = []
+    metadata_by_name: dict[str, dict[str, Any]] = {}
+    command_by_name: dict[str, list[str]] = {}
+    concurrent_runtime_started_at = time.time()
+    try:
+        for index, (_, spec, metadata) in enumerate(process_specs):
+            handle = start_concurrent_process(spec, stream_output=stream_output)
+            handles.append(handle)
+            metadata_by_name[spec.name] = metadata
+            command_by_name[spec.name] = spec.command
+            if index == 1:
+                time.sleep(CONCURRENT_PIPELINE_WARMUP_SECONDS)
+    except FileNotFoundError as exc:
+        terminate_concurrent_processes(
+            handles,
+            reason=f"startup failure while preparing concurrent runtime: {exc}",
+        )
+        results.extend(
+            make_concurrent_process_check_result(
+                result=process_result,
+                command=command_by_name[process_result.name],
+                metadata={
+                    **metadata_by_name[process_result.name],
+                    "terminated_by_orchestrator": process_result.terminated_by_orchestrator,
+                    "termination_reason": process_result.termination_reason,
+                },
+            )
+            for process_result in wait_for_concurrent_processes(handles)
+        )
+        results.append(
+            make_result(
+                name="profile_pipeline_concurrent_runtime",
+                status="failed",
+                required=True,
+                details=f"Failed to start a concurrent runtime process: {exc}",
+                metadata=context,
+            )
+        )
+        return results
+
+    process_results = wait_for_concurrent_processes(handles)
+    total_concurrent_wall_clock_duration_seconds = round(
+        time.time() - concurrent_runtime_started_at, 3
+    )
+    concurrent_process_summary = summarize_concurrent_process_results(process_results)
+    process_failed = False
+    failed_process_names: list[str] = []
+    for process_result in process_results:
+        if process_result.return_code != 0:
+            process_failed = True
+            failed_process_names.append(process_result.name)
+        results.append(
+            make_concurrent_process_check_result(
+                result=process_result,
+                command=command_by_name[process_result.name],
+                metadata={
+                    **metadata_by_name[process_result.name],
+                    "terminated_by_orchestrator": process_result.terminated_by_orchestrator,
+                    "termination_reason": process_result.termination_reason,
+                },
+            )
+        )
+
+    runtime_status = "passed" if not process_failed else "failed"
+    runtime_details = (
+        f"Concurrent {profile_name} runtime flow completed successfully for consumer, warehouse loader, and producer."
+    )
+    if process_failed:
+        runtime_details = (
+            "Concurrent runtime flow failed because one or more required processes returned "
+            f"non-zero exit codes: {', '.join(failed_process_names)}."
+        )
+    results.append(
+        make_result(
+            name="profile_pipeline_concurrent_runtime",
+            status=runtime_status,
+            required=True,
+            details=runtime_details,
+            metadata={
+                **context,
+                "failed_process_names": failed_process_names,
+                "total_wall_clock_duration_seconds": total_concurrent_wall_clock_duration_seconds,
+                "processes": concurrent_process_summary,
+            },
+        )
+    )
+
+    post_counts_result, post_counts = read_postgres_counts()
+    post_counts_result.name = "profile_pipeline_post_run_postgres_counts"
+    results.append(post_counts_result)
+    if results[-1].status == "failed":
+        return results
+
+    if pre_counts is not None and post_counts is not None:
+        processed_delta = post_counts["processed_count"] - pre_counts["processed_count"]
+        invalid_delta = post_counts["invalid_count"] - pre_counts["invalid_count"]
+        total_delta = processed_delta + invalid_delta
+        details = (
+            f"PostgreSQL row-count delta after the controlled {profile_name} concurrent runtime flow: "
+            f"processed_delta={processed_delta}, invalid_delta={invalid_delta}, total_delta={total_delta}, "
+            f"expected_rows={expected_rows}."
+        )
+        status = (
+            "passed"
+            if total_delta == expected_rows and processed_delta >= 0 and invalid_delta >= 0
+            else "failed"
+        )
+        if total_delta != expected_rows:
+            details = (
+                f"Controlled {profile_name} concurrent runtime loaded {total_delta} total rows into PostgreSQL, "
+                f"but expected {expected_rows} rows from the bounded {profile_name} dataset."
+            )
+        results.append(
+            make_result(
+                name="profile_pipeline_verify_postgres_deltas",
+                status=status,
+                required=True,
+                details=details,
+                metadata={
+                    **context,
+                    "pre_counts": pre_counts,
+                    "post_counts": post_counts,
+                    "processed_delta": processed_delta,
+                    "invalid_delta": invalid_delta,
+                    "total_delta": total_delta,
+                },
+            )
+        )
+
+    anomaly_result = run_anomaly_detection_check(
+        skip_anomaly_detection=skip_anomaly_detection,
+        max_rows=expected_rows,
+        dry_run=dry_run,
+        check_name="profile_pipeline_anomaly_detection_read_only",
+    )
+    results.append(anomaly_result)
+    return results
+
+
+def run_sequential_profile_pipeline(
+    *,
+    profile_name: str,
+    dataset_path: Path,
+    max_rows: int,
+    dry_run: bool,
+    skip_anomaly_detection: bool,
+    stream_output: bool,
+    progress_mode: str,
+) -> list[CheckResult]:
+    expected_rows = count_bounded_dataset_rows(dataset_path=dataset_path, max_rows=max_rows)
+    context = create_pipeline_runtime_context(
+        profile_name=profile_name,
+        max_rows=max_rows,
+        pipeline_execution_mode="sequential",
+    )
     progress_interval = choose_progress_interval(expected_rows)
     context["resolved_dataset_path"] = str(dataset_path)
     context["expected_dataset_rows"] = expected_rows
@@ -1071,6 +1805,39 @@ def run_controlled_profile_pipeline(
     )
     results.append(anomaly_result)
     return results
+
+
+def run_controlled_profile_pipeline(
+    *,
+    profile_name: str,
+    dataset_path: Path,
+    max_rows: int,
+    dry_run: bool,
+    skip_anomaly_detection: bool,
+    stream_output: bool,
+    progress_mode: str,
+    pipeline_execution_mode: str,
+) -> list[CheckResult]:
+    if pipeline_execution_mode == "concurrent":
+        return run_concurrent_profile_pipeline(
+            profile_name=profile_name,
+            dataset_path=dataset_path,
+            max_rows=max_rows,
+            dry_run=dry_run,
+            skip_anomaly_detection=skip_anomaly_detection,
+            stream_output=stream_output,
+            progress_mode=progress_mode,
+        )
+
+    return run_sequential_profile_pipeline(
+        profile_name=profile_name,
+        dataset_path=dataset_path,
+        max_rows=max_rows,
+        dry_run=dry_run,
+        skip_anomaly_detection=skip_anomaly_detection,
+        stream_output=stream_output,
+        progress_mode=progress_mode,
+    )
 
 
 def run_command(
@@ -1699,6 +2466,21 @@ def extract_profile_pipeline_progress(results: list[CheckResult]) -> dict[str, A
     return progress or None
 
 
+def extract_concurrent_runtime_summary(results: list[CheckResult]) -> dict[str, Any] | None:
+    for result in results:
+        if result.name == "profile_pipeline_concurrent_runtime" and result.metadata:
+            return {
+                "status": result.status,
+                "details": result.details,
+                "total_wall_clock_duration_seconds": result.metadata.get(
+                    "total_wall_clock_duration_seconds"
+                ),
+                "failed_process_names": result.metadata.get("failed_process_names", []),
+                "processes": result.metadata.get("processes", {}),
+            }
+    return None
+
+
 def print_human_summary(
     *,
     profile_name: str,
@@ -1723,12 +2505,16 @@ def build_output_payload(
     dataset_path: Path,
     results: list[CheckResult],
 ) -> dict[str, Any]:
+    pipeline_execution_mode = determine_pipeline_execution_mode(
+        concurrent_pipeline=args.concurrent_pipeline
+    )
     summary = summarize_results(results)
     stage_durations = extract_stage_durations(
         results=results,
         run_profile_pipeline=args.run_profile_pipeline,
     )
     profile_pipeline_progress = extract_profile_pipeline_progress(results)
+    concurrent_runtime_summary = extract_concurrent_runtime_summary(results)
     return {
         "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "project_root": str(PROJECT_ROOT),
@@ -1737,6 +2523,7 @@ def build_output_payload(
         "max_rows": args.max_rows,
         "dry_run": args.dry_run,
         "stream_output": args.stream_output,
+        "pipeline_execution_mode": pipeline_execution_mode,
         "progress_mode": normalize_progress_mode(
             resolve_python_progress_mode(
                 stream_output=args.stream_output,
@@ -1745,6 +2532,7 @@ def build_output_payload(
         ),
         "run_profile_pipeline": args.run_profile_pipeline,
         "run_sample_pipeline": args.run_sample_pipeline,
+        "concurrent_pipeline": args.concurrent_pipeline,
         "allow_full_run": args.allow_full_run,
         "safeguards": {
             "starts_full_pipeline": False,
@@ -1763,6 +2551,7 @@ def build_output_payload(
         "summary": summary,
         "stage_durations_seconds": stage_durations,
         "profile_pipeline_progress": profile_pipeline_progress,
+        "profile_pipeline_concurrent_runtime": concurrent_runtime_summary,
         "checks": [asdict(result) for result in results],
     }
 
@@ -1792,6 +2581,9 @@ def main() -> int:
                 f"Profile '{args.profile}' is missing expected_input_path."
             )
         dataset_path = PROJECT_ROOT / expected_input_path
+        pipeline_execution_mode = determine_pipeline_execution_mode(
+            concurrent_pipeline=args.concurrent_pipeline
+        )
 
         results = [
             check_expected_repository_structure(),
@@ -1858,6 +2650,7 @@ def main() -> int:
                     skip_anomaly_detection=args.skip_anomaly_detection,
                     stream_output=args.stream_output,
                     progress_mode=args.progress_mode,
+                    pipeline_execution_mode=pipeline_execution_mode,
                 )
             )
         elif args.run_profile_pipeline:
