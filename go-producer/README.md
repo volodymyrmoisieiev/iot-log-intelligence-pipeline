@@ -60,7 +60,7 @@ Runtime behavior:
 
 - prints startup settings including the resolved progress interval
 - prints progress lines every `PRODUCER_PROGRESS_INTERVAL` attempted rows in `log` mode
-- can switch to `PRODUCER_PROGRESS_MODE=bar` for a one-line updating progress display during live manual runs
+- can switch to `PRODUCER_PROGRESS_MODE=bar` for a larger one-line in-place progress bar during live manual runs
 - keeps the final sent/failed/skipped summary for bounded and larger runs
 
 Live manual progress-bar style example:

@@ -27,8 +27,8 @@ For the final Stage 22 progress, batching, benchmark, and cleanup runbook, see [
 - inserts invalid records into `invalid_iot_logs`
 - preserves the full processed JSON message in PostgreSQL column `raw_payload`
 - supports bounded runs with `WAREHOUSE_LOADER_MAX_MESSAGES`
-- shows a `tqdm` progress bar when `tqdm` is installed and the process is attached to a real terminal
-- suppresses repetitive success progress logs while that `tqdm` bar is active
+- supports both `tqdm` and a larger custom `bar` mode for live manual runs
+- suppresses repetitive success progress logs while a visual bar is active
 - falls back to regular interval-based logs when `tqdm` is unavailable or output is being captured
 - batches PostgreSQL inserts and Kafka offset commits with `WAREHOUSE_LOADER_BATCH_SIZE`
 - logs regular progress updates during larger runs with `WAREHOUSE_LOADER_PROGRESS_INTERVAL`
@@ -45,7 +45,7 @@ What that means:
 - Kafka topics and message payloads stay unchanged
 - the startup log now includes `batch_size`
 - flush logs show how many buffered rows were written in each batch in normal `log` mode
-- when `tqdm` is active, successful flush INFO logs are suppressed so the live progress bar stays readable, while warnings, errors, and the final summary still remain visible
+- when a visual progress bar is active, successful flush INFO logs are suppressed so the live progress bar stays readable, while warnings, errors, and the final summary still remain visible
 
 Why this helps:
 

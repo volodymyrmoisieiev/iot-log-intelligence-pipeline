@@ -28,22 +28,24 @@ One nuance from Stage 22A is that the local E2E helper normally captures subproc
 
 - the producer logs startup settings, including the resolved progress interval
 - it prints progress lines every `PRODUCER_PROGRESS_INTERVAL` attempted rows in normal `log` mode
-- it also supports `PRODUCER_PROGRESS_MODE=bar` for cleaner live manual runs, using a one-line updating progress display instead of repeated progress lines
+- it also supports `PRODUCER_PROGRESS_MODE=bar` for cleaner live manual runs, using a larger one-line updating progress display instead of repeated progress lines
 - each progress line shows attempted, total, sent, and failed counts
 
 ### Python consumer
 
 - the consumer logs startup settings, including the progress interval
-- when `tqdm` is installed and the process is attached to a real terminal, it shows a live progress bar
-- while that bar is active, repetitive success progress INFO lines are suppressed
+- it supports both `tqdm` and a larger custom `bar` mode for live manual runs
+- the custom `bar` mode is preferred for local E2E stream output because Docker and PowerShell render it more cleanly
+- while a visual bar is active, repetitive success progress INFO lines are suppressed
 - when `tqdm` is unavailable or output is being captured, it falls back to regular interval-based log lines
 - progress updates happen every `CONSUMER_PROGRESS_INTERVAL` consumed messages
 
 ### Warehouse loader
 
 - the loader logs startup settings, including progress interval and batch size
-- when `tqdm` is installed and the process is attached to a real terminal, it shows a live progress bar
-- while that bar is active, repetitive interval progress INFO lines and successful `flushed warehouse batch ...` INFO lines are suppressed
+- it supports both `tqdm` and a larger custom `bar` mode for live manual runs
+- the custom `bar` mode is preferred for local E2E stream output because Docker and PowerShell render it more cleanly
+- while a visual bar is active, repetitive interval progress INFO lines and successful `flushed warehouse batch ...` INFO lines are suppressed
 - when `tqdm` is unavailable or output is being captured, it falls back to regular interval-based log lines
 - progress updates happen every `WAREHOUSE_LOADER_PROGRESS_INTERVAL` consumed messages
 - flush logs show how many buffered rows were written in each batch
@@ -63,8 +65,8 @@ The local E2E helper records runtime stage durations plus the effective progress
 Stage 22 also supports two manual-observation controls in the local E2E helper:
 
 - `--stream-output` streams subprocess stdout and stderr directly to the terminal instead of fully capturing them
-- `--progress-mode auto|log|tqdm` controls how the Python consumer and warehouse loader choose between progress bars and interval logs
-- when that combination is `--stream-output --progress-mode tqdm`, the helper also sets `PRODUCER_PROGRESS_MODE=bar` so the Go producer switches to a cleaner progress-bar-first display
+- `--progress-mode auto|log|tqdm|bar` controls how the Python consumer and warehouse loader choose between progress bars and interval logs
+- when that combination is `--stream-output --progress-mode tqdm`, the helper now maps producer, consumer, and loader to the cleaner custom `bar` mode for better readability
 
 ## What `tqdm` Does
 
@@ -85,7 +87,8 @@ Mode behavior:
 
 - `auto` means use `tqdm` only when output is attached to a real terminal, otherwise use logs
 - `log` means always use interval-based logging
-- `tqdm` means try to render `tqdm` even when normal TTY detection would have chosen logs, with safe fallback to logs if `tqdm` is unavailable
+- `tqdm` means keep the live-progress intent and, in the local E2E helper, map stream-output runs to the cleaner custom `bar` mode while still safely falling back to logs if needed
+- `bar` means use the custom large in-place progress bar explicitly
 
 ## Progress And Batch Controls
 
@@ -99,7 +102,7 @@ Mode behavior:
 
 - controls how the Go producer renders successful progress output
 - `log` keeps the existing repeated interval-based progress lines
-- `bar` switches to a one-line updating progress display that is easier to read during live manual E2E runs
+- `bar` switches to a larger one-line updating progress display that is easier to read during live manual E2E runs
 - default: `log`
 
 ### `CONSUMER_PROGRESS_INTERVAL`
@@ -122,7 +125,8 @@ Mode behavior:
 
 - `--stream-output` is useful for manual testing when you want to watch progress live instead of relying on captured JSON excerpts
 - `--progress-mode log` is useful when you want predictable line-based output
-- `--progress-mode tqdm` is useful when you want the clearest live terminal feedback during manual E2E runs, with the Python components suppressing repetitive success logs and the Go producer switching to `PRODUCER_PROGRESS_MODE=bar`
+- `--progress-mode tqdm` is useful when you want the clearest live terminal feedback during manual E2E runs, with the helper switching all three pipeline stages into a cleaner progress-bar-first presentation
+- `--progress-mode bar` is useful when you want to request that custom live progress-bar presentation explicitly
 - when `--stream-output` is not used, the original captured/report behavior stays unchanged
 
 ## Why Batching Improved Performance

@@ -71,7 +71,7 @@ Useful optional flags:
 - `--skip-anomaly-detection`
 - `--skip-terraform`
 - `--stream-output`
-- `--progress-mode auto|log|tqdm`
+- `--progress-mode auto|log|tqdm|bar`
 
 ## Controlled Sample Runtime E2E Example
 
@@ -95,11 +95,11 @@ What this mode adds:
 How progress is displayed in this mode:
 
 - the Go producer prints interval-based progress lines in normal captured or `log` runs
-- when you combine `--stream-output --progress-mode tqdm`, the E2E helper switches the Go producer to `PRODUCER_PROGRESS_MODE=bar` so it uses a cleaner one-line updating progress display instead of repeated `producer progress attempted=...` lines
-- the Python consumer and warehouse loader use `tqdm` only when it is installed and the process is attached to a real terminal
-- when `tqdm` is active, the Python components suppress repetitive interval-style success progress logs so the live bars stay readable
-- when `tqdm` is unavailable or output is being captured, the Python components fall back to regular interval-based log lines
-- when the warehouse loader is running with `tqdm`, successful per-batch `flushed warehouse batch ...` logs are also suppressed, while warnings, errors, and the final summary still remain visible
+- when you combine `--stream-output --progress-mode tqdm`, the E2E helper switches producer, consumer, and warehouse-loader to a cleaner custom `bar` mode
+- that live `bar` mode uses larger in-place progress bars with carriage-return updates instead of repeated success progress lines
+- the Python components still support `tqdm`, but the custom `bar` mode is preferred for live Docker and PowerShell streaming because it is easier to read
+- when live bars are not active, the Python components fall back to regular interval-based log lines
+- while the custom bar is active, successful per-batch `flushed warehouse batch ...` logs are also suppressed, while warnings, errors, and the final summary still remain visible
 - the JSON summary records the effective per-component progress intervals under `profile_pipeline_progress`
 - the summary now also records the effective producer progress mode and warehouse-loader `batch_size`
 
@@ -107,14 +107,15 @@ Why `tqdm` is hidden in captured mode:
 
 - the local E2E helper normally captures subprocess stdout and stderr so it can write JSON excerpts
 - once output is captured instead of attached to your terminal, `tqdm` no longer behaves like a live interactive progress bar
-- the Python components then fall back to interval-based logs in `auto` mode
+- captured mode is therefore still best for JSON-friendly debug logs, while live stream mode is now best for the larger custom progress bars
 
 When you want live manual progress:
 
 - add `--stream-output` so producer, consumer, and loader output is sent directly to your terminal
-- use `--progress-mode tqdm` if you want to force `tqdm` for the Python components during that manual run
+- use `--progress-mode tqdm` if you want the helper to switch live stream mode into the cleaner custom bar display for all three pipeline stages
+- use `--progress-mode bar` if you want to request that custom live progress-bar mode explicitly
 - use `--progress-mode log` if you want plain interval-based logs even in a real terminal
-- in that live `tqdm` mode, the E2E helper also sets `PRODUCER_PROGRESS_MODE=bar` so the producer uses a progress-bar-first style instead of repeated progress lines
+- in those live bar-oriented modes, the E2E helper sets `PRODUCER_PROGRESS_MODE=bar` and `PYTHON_PROGRESS_MODE=bar`
 
 Captured/report mode example:
 
@@ -132,7 +133,8 @@ Progress mode guidance:
 
 - `auto` keeps the current safe default and behaves like `tqdm_if_tty_else_log`
 - `log` is useful when you want stable line-based output in terminals, shell transcripts, or copy-paste-friendly reviews
-- `tqdm` is useful for manual observation when your terminal can render the live bars and you want the clearest visual feedback with less success-log spam
+- `tqdm` is useful as the friendly CLI trigger for the cleaner custom live bar mode in the local E2E helper
+- `bar` is useful when you want to request that custom live progress-bar renderer explicitly
 
 This still does not run `terraform apply`, deploy AWS resources, or switch the repository to a full-dataset validation path.
 

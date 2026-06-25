@@ -31,7 +31,7 @@ DEFAULT_POSTGRES_PASSWORD = "iot_password"
 DEFAULT_PROGRESS_INTERVAL = 1000
 DEFAULT_WAREHOUSE_LOADER_BATCH_SIZE = 1000
 KAFKA_TOPIC_TOOL_PATH = "/opt/kafka/bin/kafka-topics.sh"
-PROGRESS_MODE_CHOICES = ("auto", "log", "tqdm")
+PROGRESS_MODE_CHOICES = ("auto", "log", "tqdm", "bar")
 
 REQUIRED_DIRECTORIES = [
     "airflow",
@@ -457,8 +457,16 @@ def normalize_progress_mode(progress_mode: str) -> str:
     return progress_mode
 
 
-def choose_producer_progress_mode(*, stream_output: bool, progress_mode: str) -> str:
+def resolve_python_progress_mode(*, stream_output: bool, progress_mode: str) -> str:
+    if progress_mode == "bar":
+        return "bar" if stream_output else "log"
     if stream_output and progress_mode == "tqdm":
+        return "bar"
+    return progress_mode
+
+
+def choose_producer_progress_mode(*, stream_output: bool, progress_mode: str) -> str:
+    if stream_output and progress_mode == "bar":
         return "bar"
     return "log"
 
@@ -743,10 +751,14 @@ def run_controlled_profile_pipeline(
     context["consumer_progress_interval"] = progress_interval
     context["warehouse_loader_progress_interval"] = progress_interval
     context["warehouse_loader_batch_size"] = DEFAULT_WAREHOUSE_LOADER_BATCH_SIZE
-    context["python_progress_mode"] = normalize_progress_mode(progress_mode)
-    context["producer_progress_mode"] = choose_producer_progress_mode(
+    effective_python_progress_mode = resolve_python_progress_mode(
         stream_output=stream_output,
         progress_mode=progress_mode,
+    )
+    context["python_progress_mode"] = normalize_progress_mode(effective_python_progress_mode)
+    context["producer_progress_mode"] = choose_producer_progress_mode(
+        stream_output=stream_output,
+        progress_mode=effective_python_progress_mode,
     )
 
     if expected_rows == 0:
@@ -913,7 +925,7 @@ def run_controlled_profile_pipeline(
         "-e",
         f"CONSUMER_PROGRESS_INTERVAL={context['consumer_progress_interval']}",
         "-e",
-        f"PYTHON_PROGRESS_MODE={progress_mode}",
+        f"PYTHON_PROGRESS_MODE={effective_python_progress_mode}",
         "python-consumer",
     ]
     results.append(
@@ -928,7 +940,7 @@ def run_controlled_profile_pipeline(
             dry_run_detail=(
                 f"Would run the Python consumer with CONSUMER_MAX_MESSAGES={expected_rows}, "
                 f"CONSUMER_PROGRESS_INTERVAL={context['consumer_progress_interval']}, "
-                f"PYTHON_PROGRESS_MODE={progress_mode}, and isolated Kafka topics."
+                f"PYTHON_PROGRESS_MODE={effective_python_progress_mode}, and isolated Kafka topics."
             ),
             stream_output=stream_output,
             stream_output_to_temp=not stream_output,
@@ -936,7 +948,7 @@ def run_controlled_profile_pipeline(
                 **context,
                 "component": "consumer",
                 "progress_interval": context["consumer_progress_interval"],
-                "progress_mode": normalize_progress_mode(progress_mode),
+                "progress_mode": normalize_progress_mode(effective_python_progress_mode),
                 "output_mode": "streamed" if stream_output else "captured",
             },
         )
@@ -963,7 +975,7 @@ def run_controlled_profile_pipeline(
         "-e",
         f"WAREHOUSE_LOADER_BATCH_SIZE={context['warehouse_loader_batch_size']}",
         "-e",
-        f"PYTHON_PROGRESS_MODE={progress_mode}",
+        f"PYTHON_PROGRESS_MODE={effective_python_progress_mode}",
         "warehouse-loader",
     ]
     results.append(
@@ -979,7 +991,7 @@ def run_controlled_profile_pipeline(
                 f"Would run the warehouse loader with WAREHOUSE_LOADER_MAX_MESSAGES={expected_rows}, "
                 f"WAREHOUSE_LOADER_PROGRESS_INTERVAL={context['warehouse_loader_progress_interval']}, "
                 f"WAREHOUSE_LOADER_BATCH_SIZE={context['warehouse_loader_batch_size']}, "
-                f"PYTHON_PROGRESS_MODE={progress_mode}, and isolated Kafka topics."
+                f"PYTHON_PROGRESS_MODE={effective_python_progress_mode}, and isolated Kafka topics."
             ),
             stream_output=stream_output,
             stream_output_to_temp=not stream_output,
@@ -988,7 +1000,7 @@ def run_controlled_profile_pipeline(
                 "component": "warehouse_loader",
                 "progress_interval": context["warehouse_loader_progress_interval"],
                 "batch_size": context["warehouse_loader_batch_size"],
-                "progress_mode": normalize_progress_mode(progress_mode),
+                "progress_mode": normalize_progress_mode(effective_python_progress_mode),
                 "output_mode": "streamed" if stream_output else "captured",
             },
         )
@@ -1725,7 +1737,12 @@ def build_output_payload(
         "max_rows": args.max_rows,
         "dry_run": args.dry_run,
         "stream_output": args.stream_output,
-        "progress_mode": normalize_progress_mode(args.progress_mode),
+        "progress_mode": normalize_progress_mode(
+            resolve_python_progress_mode(
+                stream_output=args.stream_output,
+                progress_mode=args.progress_mode,
+            )
+        ),
         "run_profile_pipeline": args.run_profile_pipeline,
         "run_sample_pipeline": args.run_sample_pipeline,
         "allow_full_run": args.allow_full_run,

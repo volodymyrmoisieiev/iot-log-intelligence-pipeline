@@ -49,13 +49,13 @@ def flush_batches(
     *,
     consumer: Consumer,
     database: WarehouseDatabase,
+    progress: ProgressReporter,
     processed_batch: list[PendingProcessedMessage],
     invalid_batch: list[PendingInvalidMessage],
     processed_count: int,
     invalid_count: int,
     failed_count: int,
     batch_size: int,
-    suppress_success_logs: bool,
 ) -> tuple[int, int, int, int]:
     buffered_messages = len(processed_batch) + len(invalid_batch)
     if buffered_messages == 0:
@@ -75,6 +75,7 @@ def flush_batches(
         invalid_count += len(invalid_rows)
     except Exception as exc:
         database.rollback()
+        progress.prepare_log_line()
         logger.warning(
             "batch insert failed for %s buffered messages; falling back to per-message inserts: %s",
             buffered_messages,
@@ -85,8 +86,9 @@ def flush_batches(
             commit_offsets(consumer, buffered_kafka_messages)
         except Exception as exc:
             failed_count += buffered_messages
+            progress.prepare_log_line()
             logger.exception("failed to commit Kafka offsets for flushed warehouse batch: %s", exc)
-        if not suppress_success_logs:
+        if not progress.is_visual_mode_active():
             logger.info(
                 "flushed warehouse batch batch_messages=%s processed_batch=%s invalid_batch=%s batch_size=%s inserted_processed=%s inserted_invalid=%s failed=%s",
                 buffered_messages,
@@ -108,10 +110,12 @@ def flush_batches(
                 commit_offsets(consumer, [entry.message])
             except Exception as exc:
                 failed_count += 1
+                progress.prepare_log_line()
                 logger.exception("failed to commit Kafka offset for processed message: %s", exc)
         except Exception as exc:
             database.rollback()
             failed_count += 1
+            progress.prepare_log_line()
             logger.exception("failed to process buffered processed message: %s", exc)
 
     for entry in invalid_batch:
@@ -123,12 +127,15 @@ def flush_batches(
                 commit_offsets(consumer, [entry.message])
             except Exception as exc:
                 failed_count += 1
+                progress.prepare_log_line()
                 logger.exception("failed to commit Kafka offset for invalid message: %s", exc)
         except Exception as exc:
             database.rollback()
             failed_count += 1
+            progress.prepare_log_line()
             logger.exception("failed to process buffered invalid message: %s", exc)
 
+    progress.prepare_log_line()
     logger.info(
         "completed fallback warehouse flush batch_messages=%s batch_size=%s inserted_processed=%s inserted_invalid=%s failed=%s",
         buffered_messages,
@@ -192,17 +199,27 @@ def main() -> int:
                 processed_count, invalid_count, failed_count, flushed = flush_batches(
                     consumer=consumer,
                     database=database,
+                    progress=progress,
                     processed_batch=processed_batch,
                     invalid_batch=invalid_batch,
                     processed_count=processed_count,
                     invalid_count=invalid_count,
                     failed_count=failed_count,
                     batch_size=config.warehouse_loader_batch_size,
-                    suppress_success_logs=progress.is_tqdm_active(),
                 )
                 batches_flushed += flushed
                 processed_batch.clear()
                 invalid_batch.clear()
+                progress.update(
+                    consumed_count,
+                    inserted_processed=processed_count,
+                    inserted_invalid=invalid_count,
+                    failed=failed_count,
+                    buffered=0,
+                    batches_flushed=batches_flushed,
+                    group_id=config.warehouse_loader_group_id,
+                )
+                progress.prepare_log_line()
                 logger.info("reached max messages limit: %s", config.warehouse_loader_max_messages)
                 break
 
@@ -214,17 +231,27 @@ def main() -> int:
                     processed_count, invalid_count, failed_count, flushed = flush_batches(
                         consumer=consumer,
                         database=database,
+                        progress=progress,
                         processed_batch=processed_batch,
                         invalid_batch=invalid_batch,
                         processed_count=processed_count,
                         invalid_count=invalid_count,
                         failed_count=failed_count,
                         batch_size=config.warehouse_loader_batch_size,
-                        suppress_success_logs=progress.is_tqdm_active(),
                     )
                     batches_flushed += flushed
                     processed_batch.clear()
                     invalid_batch.clear()
+                    progress.update(
+                        consumed_count,
+                        inserted_processed=processed_count,
+                        inserted_invalid=invalid_count,
+                        failed=failed_count,
+                        buffered=0,
+                        batches_flushed=batches_flushed,
+                        group_id=config.warehouse_loader_group_id,
+                    )
+                    progress.prepare_log_line()
                     if consumed_count == 0:
                         logger.info(
                             "no messages received before timeout; group_id=%s idle_timeout_seconds=%s",
@@ -238,6 +265,7 @@ def main() -> int:
 
             if message.error():
                 failed_count += 1
+                progress.prepare_log_line()
                 logger.error("consumer error: %s", message.error().str())
                 continue
 
@@ -266,6 +294,7 @@ def main() -> int:
             except Exception as exc:
                 failed_count += 1
                 database.rollback()
+                progress.prepare_log_line()
                 logger.exception("failed to process warehouse message: %s", exc)
 
             buffered_count = len(processed_batch) + len(invalid_batch)
@@ -273,40 +302,47 @@ def main() -> int:
                 processed_count, invalid_count, failed_count, flushed = flush_batches(
                     consumer=consumer,
                     database=database,
+                    progress=progress,
                     processed_batch=processed_batch,
                     invalid_batch=invalid_batch,
                     processed_count=processed_count,
                     invalid_count=invalid_count,
                     failed_count=failed_count,
                     batch_size=config.warehouse_loader_batch_size,
-                    suppress_success_logs=progress.is_tqdm_active(),
                 )
                 batches_flushed += flushed
                 processed_batch.clear()
                 invalid_batch.clear()
                 buffered_count = 0
 
-            progress.update(
-                consumed_count,
-                inserted_processed=processed_count,
-                inserted_invalid=invalid_count,
-                failed=failed_count,
-                buffered=buffered_count,
-                batches_flushed=batches_flushed,
-                group_id=config.warehouse_loader_group_id,
+            skip_visual_final_update = (
+                progress.is_visual_mode_active()
+                and bool(config.warehouse_loader_max_messages)
+                and consumed_count >= config.warehouse_loader_max_messages
+                and buffered_count > 0
             )
+            if not skip_visual_final_update:
+                progress.update(
+                    consumed_count,
+                    inserted_processed=processed_count,
+                    inserted_invalid=invalid_count,
+                    failed=failed_count,
+                    buffered=buffered_count,
+                    batches_flushed=batches_flushed,
+                    group_id=config.warehouse_loader_group_id,
+                )
     finally:
         if database is not None and (processed_batch or invalid_batch):
             processed_count, invalid_count, failed_count, flushed = flush_batches(
                 consumer=consumer,
                 database=database,
+                progress=progress,
                 processed_batch=processed_batch,
                 invalid_batch=invalid_batch,
                 processed_count=processed_count,
                 invalid_count=invalid_count,
                 failed_count=failed_count,
                 batch_size=config.warehouse_loader_batch_size,
-                suppress_success_logs=progress.is_tqdm_active(),
             )
             batches_flushed += flushed
             processed_batch.clear()
@@ -314,6 +350,7 @@ def main() -> int:
         consumer.close()
         database.close()
         progress.close()
+        progress.prepare_log_line()
         logger.info(
             "warehouse loader summary consumed=%s inserted_processed=%s inserted_invalid=%s failed=%s batches_flushed=%s batch_size=%s max_messages=%s group_id=%s",
             consumed_count,
