@@ -24,6 +24,8 @@ For the final Stage 21 runbook, validated full-run summary, bottleneck notes, an
 
 For the final Stage 22 progress, batching, and full-benchmark runbook, see [docs/stage-22-progress-and-loader-optimization.md](docs/stage-22-progress-and-loader-optimization.md).
 
+For the final Stage 23 concurrent runtime runbook, validated sample and medium results, JSON reporting notes, and follow-up ideas, see [docs/stage-23-concurrent-streaming-e2e-runtime.md](docs/stage-23-concurrent-streaming-e2e-runtime.md).
+
 ## Why This Is Not a Full Dataset Run
 
 The smoke test keeps `sample` as the default profile and caps row-oriented dataset checks with `--max-rows` so normal local validation stays fast, predictable, and inexpensive.
