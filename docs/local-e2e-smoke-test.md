@@ -2,12 +2,11 @@
 
 ## Validation Modes
 
-There are now four related local validation modes:
+There are now three related local validation modes:
 
 - `dry-run` checks which smoke-test commands would execute and writes that plan into the JSON summary without running the external command steps
 - the default smoke test validates repository structure, selected dataset availability, Docker Compose config, Python syntax, Terraform validation, data-contract validation, and optional read-only anomaly detection without starting the full local pipeline
 - `--run-profile-pipeline` adds a controlled profile-specific runtime E2E pass that starts only the required local services, uses bounded row/message limits, and verifies PostgreSQL row-count deltas after producer, consumer, and warehouse-loader execution
-- `--concurrent-pipeline` is an opt-in Stage 23 runtime mode that now starts consumer, warehouse-loader, and producer through the local E2E helper in a minimal concurrent flow while preserving sequential mode as the default
 - `--stream-output` switches manual runtime runs from captured/report mode to live terminal streaming so progress logs or `tqdm` can be seen directly
 
 `--run-sample-pipeline` is still supported as a backward-compatible alias for `--profile sample --run-profile-pipeline`.
@@ -23,8 +22,6 @@ The script lives at `scripts/run_local_e2e_smoke_test.py` and uses only the Pyth
 For the final Stage 21 runbook, validated full-run summary, bottleneck notes, and PR-ready cleanup guidance, see [docs/stage-21-local-e2e-validation.md](docs/stage-21-local-e2e-validation.md).
 
 For the final Stage 22 progress, batching, and full-benchmark runbook, see [docs/stage-22-progress-and-loader-optimization.md](docs/stage-22-progress-and-loader-optimization.md).
-
-For the final Stage 23 concurrent runtime runbook, validated sample and medium results, JSON reporting notes, and follow-up ideas, see [docs/stage-23-concurrent-streaming-e2e-runtime.md](docs/stage-23-concurrent-streaming-e2e-runtime.md).
 
 ## Why This Is Not a Full Dataset Run
 
@@ -73,7 +70,6 @@ Useful optional flags:
 - `--skip-dbt`
 - `--skip-anomaly-detection`
 - `--skip-terraform`
-- `--concurrent-pipeline`
 - `--stream-output`
 - `--progress-mode auto|log|tqdm|bar`
 
@@ -96,23 +92,6 @@ What this mode adds:
 - reruns bounded data-contract validation
 - attempts anomaly detection in safe read-only mode and records either a result or an explicit `skip`
 
-Sequential mode remains the default Stage 23 behavior. If you add `--concurrent-pipeline`, the helper switches the JSON/report metadata to `pipeline_execution_mode=concurrent`, starts the Python consumer first, starts the warehouse loader second, waits briefly for warm-up, and starts the Go producer last.
-
-Concurrent Stage 23 foundation example:
-
-```powershell
-.\.venv-observability\Scripts\python.exe .\scripts\run_local_e2e_smoke_test.py --profile sample --max-rows 1000 --run-profile-pipeline --concurrent-pipeline --output-json docs/e2e-smoke-test-local.json
-```
-
-Current Stage 23D2 expectation:
-
-- the command should parse and run safely
-- the summary should report a real concurrent runtime result
-- the JSON summary should record `pipeline_execution_mode` as `concurrent`
-- the existing sequential path remains the default when `--concurrent-pipeline` is not used
-- the concurrent runtime starts consumer first, warehouse loader second, then producer after a short warm-up
-- the JSON summary now includes a dedicated `profile_pipeline_concurrent_runtime` section with per-process status, return code, duration, and orchestrator-termination details when concurrent mode is used
-
 How progress is displayed in this mode:
 
 - the Go producer prints interval-based progress lines in normal captured or `log` runs
@@ -133,7 +112,6 @@ Why `tqdm` is hidden in captured mode:
 When you want live manual progress:
 
 - add `--stream-output` so producer, consumer, and loader output is sent directly to your terminal
-- prefer `--stream-output --progress-mode log` for live manual concurrent runs so three processes do not compete to redraw progress bars at the same time
 - use `--progress-mode tqdm` if you want the helper to switch live stream mode into the cleaner custom bar display for all three pipeline stages
 - use `--progress-mode bar` if you want to request that custom live progress-bar mode explicitly
 - use `--progress-mode log` if you want plain interval-based logs even in a real terminal
