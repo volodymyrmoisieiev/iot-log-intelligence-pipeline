@@ -3,14 +3,16 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/segmentio/kafka-go"
 )
 
 type Producer struct {
-	writer *kafka.Writer
-	topic  string
+	writer           *kafka.Writer
+	topic            string
+	progressLineOpen bool
 }
 
 func NewProducer(cfg Config) *Producer {
@@ -37,6 +39,7 @@ func (p *Producer) PublishRecords(
 	records []CSVRecord,
 	sendDelay time.Duration,
 	progressInterval int,
+	progressMode string,
 ) (int, int) {
 	var sentCount int
 	var failedCount int
@@ -46,8 +49,9 @@ func (p *Producer) PublishRecords(
 		payload, err := record.ToJSONBytes(time.Now())
 		if err != nil {
 			failedCount++
+			p.prepareProgressLineForMessage(progressMode)
 			fmt.Printf("failed to marshal record for device %s: %v\n", record.DeviceID, err)
-			logProducerProgress(index+1, totalRecords, sentCount, failedCount, progressInterval)
+			p.logProducerProgress(index+1, totalRecords, sentCount, failedCount, progressInterval, progressMode)
 			continue
 		}
 
@@ -58,13 +62,14 @@ func (p *Producer) PublishRecords(
 
 		if err := p.writer.WriteMessages(ctx, message); err != nil {
 			failedCount++
+			p.prepareProgressLineForMessage(progressMode)
 			fmt.Printf("failed to publish record for device %s to topic %s: %v\n", record.DeviceID, p.topic, err)
-			logProducerProgress(index+1, totalRecords, sentCount, failedCount, progressInterval)
+			p.logProducerProgress(index+1, totalRecords, sentCount, failedCount, progressInterval, progressMode)
 			continue
 		}
 
 		sentCount++
-		logProducerProgress(index+1, totalRecords, sentCount, failedCount, progressInterval)
+		p.logProducerProgress(index+1, totalRecords, sentCount, failedCount, progressInterval, progressMode)
 
 		if sendDelay > 0 {
 			time.Sleep(sendDelay)
@@ -74,12 +79,17 @@ func (p *Producer) PublishRecords(
 	return sentCount, failedCount
 }
 
-func logProducerProgress(attemptedCount int, totalRecords int, sentCount int, failedCount int, progressInterval int) {
+func (p *Producer) logProducerProgress(attemptedCount int, totalRecords int, sentCount int, failedCount int, progressInterval int, progressMode string) {
 	if progressInterval <= 0 {
 		return
 	}
 
 	if attemptedCount%progressInterval != 0 && attemptedCount != totalRecords {
+		return
+	}
+
+	if progressMode == "bar" {
+		p.printProducerBar(attemptedCount, totalRecords, sentCount, failedCount)
 		return
 	}
 
@@ -90,4 +100,41 @@ func logProducerProgress(attemptedCount int, totalRecords int, sentCount int, fa
 		sentCount,
 		failedCount,
 	)
+}
+
+func (p *Producer) printProducerBar(attemptedCount int, totalRecords int, sentCount int, failedCount int) {
+	width := 40
+	filled := 0
+	percent := 0
+	if totalRecords > 0 {
+		filled = attemptedCount * width / totalRecords
+		percent = attemptedCount * 100 / totalRecords
+	}
+	if filled > width {
+		filled = width
+	}
+
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
+	fmt.Printf(
+		"\r%-18s %3d%%|%s| %d/%d sent=%d failed=%d",
+		"producer:",
+		percent,
+		bar,
+		attemptedCount,
+		totalRecords,
+		sentCount,
+		failedCount,
+	)
+	p.progressLineOpen = true
+	if attemptedCount == totalRecords {
+		fmt.Print("\n")
+		p.progressLineOpen = false
+	}
+}
+
+func (p *Producer) prepareProgressLineForMessage(progressMode string) {
+	if progressMode == "bar" && p.progressLineOpen {
+		fmt.Print("\n")
+		p.progressLineOpen = false
+	}
 }
