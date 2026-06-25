@@ -27,6 +27,7 @@ func run() error {
 	fmt.Printf("max rows: %d\n", cfg.MaxRows)
 	fmt.Printf("send delay ms: %d\n", cfg.SendDelayMS)
 	fmt.Printf("progress interval: %d\n", cfg.ProgressInterval)
+	fmt.Printf("progress mode: %s\n", cfg.ProgressMode)
 	fmt.Printf("kafka bootstrap servers: %s\n", strings.Join(cfg.BootstrapServers, ","))
 	fmt.Printf("target topic: %s\n", cfg.RawTopic)
 
@@ -45,6 +46,7 @@ func run() error {
 		records,
 		time.Duration(cfg.SendDelayMS)*time.Millisecond,
 		cfg.ProgressInterval,
+		cfg.ProgressMode,
 	)
 
 	fmt.Printf("finished publishing to topic %s: sent=%d failed=%d skipped=%d\n", cfg.RawTopic, sentCount, failedCount, skippedCount)

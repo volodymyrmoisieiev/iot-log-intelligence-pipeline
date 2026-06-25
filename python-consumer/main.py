@@ -48,6 +48,7 @@ def main() -> int:
     try:
         while True:
             if config.consumer_max_messages and consumed_count >= config.consumer_max_messages:
+                progress.prepare_log_line()
                 logger.info("reached max messages limit: %s", config.consumer_max_messages)
                 break
 
@@ -56,6 +57,7 @@ def main() -> int:
             if message_value is None:
                 idle_for = time.monotonic() - last_message_at
                 if idle_for >= config.consumer_idle_timeout_seconds:
+                    progress.prepare_log_line()
                     if consumed_count == 0:
                         logger.info(
                             "no messages received before timeout; group_id=%s idle_timeout_seconds=%s",
@@ -83,6 +85,7 @@ def main() -> int:
                     )
                 except Exception as exc:
                     failed_count += 1
+                    progress.prepare_log_line()
                     logger.exception("failed to publish valid record: %s", exc)
                 progress.update(
                     consumed_count,
@@ -104,6 +107,7 @@ def main() -> int:
                 )
             except Exception as exc:
                 failed_count += 1
+                progress.prepare_log_line()
                 logger.exception("failed to publish invalid record: %s", exc)
             progress.update(
                 consumed_count,
@@ -116,6 +120,7 @@ def main() -> int:
         consumer.close()
         producer.close()
         progress.close()
+        progress.prepare_log_line()
         logger.info(
             "consumer summary consumed=%s processed=%s invalid=%s failed=%s max_messages=%s group_id=%s",
             consumed_count,
