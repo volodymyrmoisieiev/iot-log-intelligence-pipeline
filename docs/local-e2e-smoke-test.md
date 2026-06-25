@@ -94,11 +94,14 @@ What this mode adds:
 
 How progress is displayed in this mode:
 
-- the Go producer prints interval-based progress lines such as attempted, sent, and failed counts
+- the Go producer prints interval-based progress lines in normal captured or `log` runs
+- when you combine `--stream-output --progress-mode tqdm`, the E2E helper switches the Go producer to `PRODUCER_PROGRESS_MODE=bar` so it uses a cleaner one-line updating progress display instead of repeated `producer progress attempted=...` lines
 - the Python consumer and warehouse loader use `tqdm` only when it is installed and the process is attached to a real terminal
+- when `tqdm` is active, the Python components suppress repetitive interval-style success progress logs so the live bars stay readable
 - when `tqdm` is unavailable or output is being captured, the Python components fall back to regular interval-based log lines
+- when the warehouse loader is running with `tqdm`, successful per-batch `flushed warehouse batch ...` logs are also suppressed, while warnings, errors, and the final summary still remain visible
 - the JSON summary records the effective per-component progress intervals under `profile_pipeline_progress`
-- the warehouse-loader entry in that summary now also records the effective `batch_size`
+- the summary now also records the effective producer progress mode and warehouse-loader `batch_size`
 
 Why `tqdm` is hidden in captured mode:
 
@@ -111,6 +114,7 @@ When you want live manual progress:
 - add `--stream-output` so producer, consumer, and loader output is sent directly to your terminal
 - use `--progress-mode tqdm` if you want to force `tqdm` for the Python components during that manual run
 - use `--progress-mode log` if you want plain interval-based logs even in a real terminal
+- in that live `tqdm` mode, the E2E helper also sets `PRODUCER_PROGRESS_MODE=bar` so the producer uses a progress-bar-first style instead of repeated progress lines
 
 Captured/report mode example:
 
@@ -128,7 +132,7 @@ Progress mode guidance:
 
 - `auto` keeps the current safe default and behaves like `tqdm_if_tty_else_log`
 - `log` is useful when you want stable line-based output in terminals, shell transcripts, or copy-paste-friendly reviews
-- `tqdm` is useful for manual observation when your terminal can render the live bar and you want the clearest visual feedback
+- `tqdm` is useful for manual observation when your terminal can render the live bars and you want the clearest visual feedback with less success-log spam
 
 This still does not run `terraform apply`, deploy AWS resources, or switch the repository to a full-dataset validation path.
 
@@ -201,6 +205,7 @@ The JSON report now records stage durations for:
 It also records the effective progress configuration for the controlled runtime flow:
 
 - `producer.progress_interval`
+- `producer.mode`
 - `consumer.progress_interval`
 - `warehouse_loader.progress_interval`
 - `warehouse_loader.batch_size`

@@ -55,6 +55,7 @@ def flush_batches(
     invalid_count: int,
     failed_count: int,
     batch_size: int,
+    suppress_success_logs: bool,
 ) -> tuple[int, int, int, int]:
     buffered_messages = len(processed_batch) + len(invalid_batch)
     if buffered_messages == 0:
@@ -85,16 +86,17 @@ def flush_batches(
         except Exception as exc:
             failed_count += buffered_messages
             logger.exception("failed to commit Kafka offsets for flushed warehouse batch: %s", exc)
-        logger.info(
-            "flushed warehouse batch batch_messages=%s processed_batch=%s invalid_batch=%s batch_size=%s inserted_processed=%s inserted_invalid=%s failed=%s",
-            buffered_messages,
-            len(processed_rows),
-            len(invalid_rows),
-            batch_size,
-            processed_count,
-            invalid_count,
-            failed_count,
-        )
+        if not suppress_success_logs:
+            logger.info(
+                "flushed warehouse batch batch_messages=%s processed_batch=%s invalid_batch=%s batch_size=%s inserted_processed=%s inserted_invalid=%s failed=%s",
+                buffered_messages,
+                len(processed_rows),
+                len(invalid_rows),
+                batch_size,
+                processed_count,
+                invalid_count,
+                failed_count,
+            )
         return processed_count, invalid_count, failed_count, 1
 
     for entry in processed_batch:
@@ -196,6 +198,7 @@ def main() -> int:
                     invalid_count=invalid_count,
                     failed_count=failed_count,
                     batch_size=config.warehouse_loader_batch_size,
+                    suppress_success_logs=progress.is_tqdm_active(),
                 )
                 batches_flushed += flushed
                 processed_batch.clear()
@@ -217,6 +220,7 @@ def main() -> int:
                         invalid_count=invalid_count,
                         failed_count=failed_count,
                         batch_size=config.warehouse_loader_batch_size,
+                        suppress_success_logs=progress.is_tqdm_active(),
                     )
                     batches_flushed += flushed
                     processed_batch.clear()
@@ -275,6 +279,7 @@ def main() -> int:
                     invalid_count=invalid_count,
                     failed_count=failed_count,
                     batch_size=config.warehouse_loader_batch_size,
+                    suppress_success_logs=progress.is_tqdm_active(),
                 )
                 batches_flushed += flushed
                 processed_batch.clear()
@@ -301,6 +306,7 @@ def main() -> int:
                 invalid_count=invalid_count,
                 failed_count=failed_count,
                 batch_size=config.warehouse_loader_batch_size,
+                suppress_success_logs=progress.is_tqdm_active(),
             )
             batches_flushed += flushed
             processed_batch.clear()

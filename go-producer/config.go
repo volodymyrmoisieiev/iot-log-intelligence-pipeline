@@ -16,6 +16,7 @@ const (
 	defaultSendDelayMS               = 250
 	defaultProducerMaxRows           = 0
 	defaultProducerProgressInterval  = 1000
+	defaultProducerProgressMode      = "log"
 	datasetProfileSample             = "sample"
 	datasetProfileMedium             = "medium"
 	datasetProfileFull               = "full"
@@ -29,6 +30,7 @@ type Config struct {
 	MaxRows          int
 	SendDelayMS      int
 	ProgressInterval int
+	ProgressMode     string
 }
 
 var datasetProfilePaths = map[string]string{
@@ -64,6 +66,11 @@ func LoadConfig() (Config, error) {
 		return Config{}, err
 	}
 
+	progressMode, err := getProducerProgressMode()
+	if err != nil {
+		return Config{}, err
+	}
+
 	inputFile, err := resolveInputFile(
 		datasetProfile,
 		strings.TrimSpace(os.Getenv("PRODUCER_INPUT_FILE")),
@@ -81,6 +88,7 @@ func LoadConfig() (Config, error) {
 		MaxRows:          maxRows,
 		SendDelayMS:      delayMS,
 		ProgressInterval: progressInterval,
+		ProgressMode:     progressMode,
 	}, nil
 }
 
@@ -204,6 +212,23 @@ func getDefaultBootstrapServers() string {
 	}
 
 	return defaultLocalBootstrapServers
+}
+
+func getProducerProgressMode() (string, error) {
+	value := strings.ToLower(strings.TrimSpace(os.Getenv("PRODUCER_PROGRESS_MODE")))
+	if value == "" {
+		return defaultProducerProgressMode, nil
+	}
+
+	switch value {
+	case "log", "bar":
+		return value, nil
+	default:
+		return "", fmt.Errorf(
+			"PRODUCER_PROGRESS_MODE=%q is invalid; allowed values are log, bar",
+			value,
+		)
+	}
 }
 
 func getEnvInt(key string, fallback int) (int, error) {

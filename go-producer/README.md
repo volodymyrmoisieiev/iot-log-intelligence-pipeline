@@ -16,6 +16,7 @@ For the final Stage 22 progress, batching, benchmark, and cleanup runbook, see [
 - `PRODUCER_INPUT_FILE` - optional explicit CSV input path override; if set, it overrides `DATASET_PROFILE`
 - `PRODUCER_MAX_ROWS` - optional positive row limit; `0` means no limit
 - `PRODUCER_PROGRESS_INTERVAL` - print producer progress every N attempted rows, default `1000`
+- `PRODUCER_PROGRESS_MODE` - successful progress output style, `log` or `bar`, default `log`
 - `PRODUCER_SEND_DELAY_MS` - delay between messages in milliseconds, default `250`
 
 ## Dataset profile paths
@@ -58,8 +59,15 @@ Use `full` only when `data/raw/full_iot_logs.csv` exists locally and you intenti
 Runtime behavior:
 
 - prints startup settings including the resolved progress interval
-- prints progress lines every `PRODUCER_PROGRESS_INTERVAL` attempted rows
+- prints progress lines every `PRODUCER_PROGRESS_INTERVAL` attempted rows in `log` mode
+- can switch to `PRODUCER_PROGRESS_MODE=bar` for a one-line updating progress display during live manual runs
 - keeps the final sent/failed/skipped summary for bounded and larger runs
+
+Live manual progress-bar style example:
+
+```powershell
+docker compose run --build --rm -e PRODUCER_SEND_DELAY_MS=0 -e PRODUCER_PROGRESS_MODE=bar go-producer
+```
 
 ## Run locally with Go
 

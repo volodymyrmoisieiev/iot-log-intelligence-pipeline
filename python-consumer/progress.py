@@ -60,6 +60,7 @@ class ProgressReporter:
         if self._bar is not None:
             self._bar.update(1)
             self._bar.set_postfix(counts, refresh=False)
+            return
 
         if current_count % self._interval == 0:
             metrics = " ".join(f"{key}={value}" for key, value in counts.items())
@@ -73,6 +74,9 @@ class ProgressReporter:
     def close(self) -> None:
         if self._bar is not None:
             self._bar.close()
+
+    def is_tqdm_active(self) -> bool:
+        return self._bar is not None
 
     def _should_use_tqdm(self) -> bool:
         if tqdm is None:
