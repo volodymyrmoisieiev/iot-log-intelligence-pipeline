@@ -162,6 +162,14 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--concurrent-pipeline",
+        action="store_true",
+        help=(
+            "Prepare for a future concurrent profile pipeline mode where consumer, "
+            "warehouse-loader, and producer run at the same time."
+        ),
+    )
+    parser.add_argument(
         "--allow-full-run",
         action="store_true",
         help="Explicitly allow a controlled full-profile runtime flow.",
@@ -248,6 +256,10 @@ def ensure_args_are_valid(args: argparse.Namespace) -> None:
         raise SmokeTestConfigurationError(
             "--run-sample-pipeline is a backward-compatible alias for the sample profile only. "
             "Use --run-profile-pipeline for medium or future profile runtime checks."
+        )
+    if args.concurrent_pipeline and not args.run_profile_pipeline:
+        raise SmokeTestConfigurationError(
+            "--concurrent-pipeline requires --run-profile-pipeline."
         )
     if args.run_profile_pipeline and args.profile == "full" and not args.allow_full_run:
         raise SmokeTestConfigurationError(
@@ -426,7 +438,16 @@ def choose_progress_interval(expected_rows: int) -> int:
     return max(1, min(DEFAULT_PROGRESS_INTERVAL, expected_rows))
 
 
-def create_pipeline_runtime_context(profile_name: str, max_rows: int) -> dict[str, Any]:
+def determine_pipeline_execution_mode(*, concurrent_pipeline: bool) -> str:
+    return "concurrent" if concurrent_pipeline else "sequential"
+
+
+def create_pipeline_runtime_context(
+    profile_name: str,
+    max_rows: int,
+    *,
+    pipeline_execution_mode: str,
+) -> dict[str, Any]:
     runtime_id = build_runtime_id(f"stage21c-{profile_name}")
     topic_suffix = runtime_id.replace("-", "_")
     raw_topic = f"iot_raw_logs_{topic_suffix}"
@@ -436,6 +457,7 @@ def create_pipeline_runtime_context(profile_name: str, max_rows: int) -> dict[st
     return {
         "runtime_id": runtime_id,
         "profile": profile_name,
+        "pipeline_execution_mode": pipeline_execution_mode,
         "raw_topic": raw_topic,
         "processed_topic": processed_topic,
         "invalid_topic": invalid_topic,
@@ -732,7 +754,7 @@ def read_postgres_counts() -> tuple[CheckResult, dict[str, int] | None]:
     )
 
 
-def run_controlled_profile_pipeline(
+def run_concurrent_profile_pipeline(
     *,
     profile_name: str,
     dataset_path: Path,
@@ -743,7 +765,67 @@ def run_controlled_profile_pipeline(
     progress_mode: str,
 ) -> list[CheckResult]:
     expected_rows = count_bounded_dataset_rows(dataset_path=dataset_path, max_rows=max_rows)
-    context = create_pipeline_runtime_context(profile_name=profile_name, max_rows=max_rows)
+    context = create_pipeline_runtime_context(
+        profile_name=profile_name,
+        max_rows=max_rows,
+        pipeline_execution_mode="concurrent",
+    )
+    progress_interval = choose_progress_interval(expected_rows)
+    context["resolved_dataset_path"] = str(dataset_path)
+    context["expected_dataset_rows"] = expected_rows
+    context["producer_progress_interval"] = progress_interval
+    context["consumer_progress_interval"] = progress_interval
+    context["warehouse_loader_progress_interval"] = progress_interval
+    context["warehouse_loader_batch_size"] = DEFAULT_WAREHOUSE_LOADER_BATCH_SIZE
+    effective_python_progress_mode = resolve_python_progress_mode(
+        stream_output=stream_output,
+        progress_mode=progress_mode,
+    )
+    context["python_progress_mode"] = normalize_progress_mode(effective_python_progress_mode)
+    context["producer_progress_mode"] = choose_producer_progress_mode(
+        stream_output=stream_output,
+        progress_mode=effective_python_progress_mode,
+    )
+    context["concurrent_pipeline_implemented"] = False
+
+    status = "dry_run" if dry_run else "failed"
+    details = (
+        f"Would prepare the controlled {profile_name} profile pipeline in concurrent mode, "
+        "but Stage 23C will implement the actual parallel process orchestration."
+        if dry_run
+        else (
+            f"Concurrent profile pipeline mode was requested for the controlled {profile_name} "
+            "runtime flow, but Stage 23C has not implemented the actual parallel process "
+            "orchestration yet."
+        )
+    )
+    return [
+        make_result(
+            name="profile_pipeline_concurrent_runtime",
+            status=status,
+            required=True,
+            details=details,
+            metadata=context,
+        )
+    ]
+
+
+def run_sequential_profile_pipeline(
+    *,
+    profile_name: str,
+    dataset_path: Path,
+    max_rows: int,
+    dry_run: bool,
+    skip_anomaly_detection: bool,
+    stream_output: bool,
+    progress_mode: str,
+) -> list[CheckResult]:
+    expected_rows = count_bounded_dataset_rows(dataset_path=dataset_path, max_rows=max_rows)
+    context = create_pipeline_runtime_context(
+        profile_name=profile_name,
+        max_rows=max_rows,
+        pipeline_execution_mode="sequential",
+    )
     progress_interval = choose_progress_interval(expected_rows)
     context["resolved_dataset_path"] = str(dataset_path)
     context["expected_dataset_rows"] = expected_rows
@@ -1071,6 +1153,39 @@ def run_controlled_profile_pipeline(
     )
     results.append(anomaly_result)
     return results
+
+
+def run_controlled_profile_pipeline(
+    *,
+    profile_name: str,
+    dataset_path: Path,
+    max_rows: int,
+    dry_run: bool,
+    skip_anomaly_detection: bool,
+    stream_output: bool,
+    progress_mode: str,
+    pipeline_execution_mode: str,
+) -> list[CheckResult]:
+    if pipeline_execution_mode == "concurrent":
+        return run_concurrent_profile_pipeline(
+            profile_name=profile_name,
+            dataset_path=dataset_path,
+            max_rows=max_rows,
+            dry_run=dry_run,
+            skip_anomaly_detection=skip_anomaly_detection,
+            stream_output=stream_output,
+            progress_mode=progress_mode,
+        )
+
+    return run_sequential_profile_pipeline(
+        profile_name=profile_name,
+        dataset_path=dataset_path,
+        max_rows=max_rows,
+        dry_run=dry_run,
+        skip_anomaly_detection=skip_anomaly_detection,
+        stream_output=stream_output,
+        progress_mode=progress_mode,
+    )
 
 
 def run_command(
@@ -1723,6 +1838,9 @@ def build_output_payload(
     dataset_path: Path,
     results: list[CheckResult],
 ) -> dict[str, Any]:
+    pipeline_execution_mode = determine_pipeline_execution_mode(
+        concurrent_pipeline=args.concurrent_pipeline
+    )
     summary = summarize_results(results)
     stage_durations = extract_stage_durations(
         results=results,
@@ -1737,6 +1855,7 @@ def build_output_payload(
         "max_rows": args.max_rows,
         "dry_run": args.dry_run,
         "stream_output": args.stream_output,
+        "pipeline_execution_mode": pipeline_execution_mode,
         "progress_mode": normalize_progress_mode(
             resolve_python_progress_mode(
                 stream_output=args.stream_output,
@@ -1745,6 +1864,7 @@ def build_output_payload(
         ),
         "run_profile_pipeline": args.run_profile_pipeline,
         "run_sample_pipeline": args.run_sample_pipeline,
+        "concurrent_pipeline": args.concurrent_pipeline,
         "allow_full_run": args.allow_full_run,
         "safeguards": {
             "starts_full_pipeline": False,
@@ -1792,6 +1912,9 @@ def main() -> int:
                 f"Profile '{args.profile}' is missing expected_input_path."
             )
         dataset_path = PROJECT_ROOT / expected_input_path
+        pipeline_execution_mode = determine_pipeline_execution_mode(
+            concurrent_pipeline=args.concurrent_pipeline
+        )
 
         results = [
             check_expected_repository_structure(),
@@ -1858,6 +1981,7 @@ def main() -> int:
                     skip_anomaly_detection=args.skip_anomaly_detection,
                     stream_output=args.stream_output,
                     progress_mode=args.progress_mode,
+                    pipeline_execution_mode=pipeline_execution_mode,
                 )
             )
         elif args.run_profile_pipeline:
