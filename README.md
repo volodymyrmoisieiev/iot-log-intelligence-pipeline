@@ -15,7 +15,7 @@
 
 IoT Log Intelligence Pipeline is a portfolio project focused on end-to-end data engineering for IoT logs: ingestion, processing, storage, transformation, and analytics.
 
-The repository is currently at Stage 22D, with a working local Kafka stack, a Go producer, a Python consumer validation layer, a local PostgreSQL warehouse foundation, a warehouse loader service, dbt staging models, dbt analytics marts on top of PostgreSQL, an optional Snowflake-ready dbt target for future cloud warehouse integration, a polished Streamlit dashboard for local analytics, a Streamlit observability monitoring section, safer repeatable local Apache Airflow orchestration for the existing pipeline steps, a fast Stage 20A GitHub Actions CI foundation for repository structure, Docker Compose validation, and lightweight Python syntax checks on pull requests and pushes to `develop` and `main`, a dedicated Stage 20B Terraform validation GitHub Actions workflow for the AWS orchestration foundation under `infra/aws-orchestration/`, a dedicated Stage 20C Python and Airflow validation GitHub Actions workflow for lightweight script compilation and DAG syntax checks, Stage 20D pull-request and release-process guidance with visible README CI quality badges, a final Stage 20E CI quality-gates runbook with PR-ready cleanup guidance, and a Stage 21A local E2E smoke-test foundation that reuses those safe checks through one bounded JSON-reporting entry point without starting the full local pipeline by default, alongside a local PySpark batch-processing foundation with a device-level feature engineering job that runs inside the local Airflow pipeline, a local MinIO-based S3-compatible object storage foundation, a local uploader that sends Spark device-feature Parquet output into MinIO, Airflow integration that uploads and validates those MinIO objects as part of the local DAG, an AWS-ready Terraform foundation, Terraform S3 data lake definitions for future AWS storage, an AWS cloud orchestration Terraform foundation for future Lambda, Step Functions, CloudWatch, IAM, and S3-integrated control-plane work, a local AWS Lambda metadata-validation foundation for cloud-side file intake, a Step Functions orchestration foundation for validation-first AWS workflow design, a CloudWatch monitoring and alarms foundation for orchestration observability, and a final Stage 19 AWS orchestration runbook for PR-ready cloud-foundation documentation, alongside the existing observability schema foundation for pipeline audit history, quality checks, and alerts, a local observability writer that persists warehouse-derived metrics into those audit tables, can optionally publish alert events to Kafka, runs near the end of the local Airflow DAG, dataset profile support that now extends through producer, consumer, loader, and the local Airflow runbook for `sample`, `medium`, and `full` style validation runs, a local performance benchmark foundation for benchmark execution, Markdown summary generation, and bottleneck-focused analysis, a Stage 17 data contract foundation, local CSV validation tooling, an Airflow pre-check for the raw IoT log schema, and a Stage 18 anomaly detection foundation with a standalone script, warehouse persistence, Airflow integration, and final PR-ready documentation, plus a Stage 22A progress-visibility foundation for long-running producer, consumer, and warehouse-loader validation runs, a Stage 22B warehouse-loader batch-insert optimization for heavier local validation flows, a Stage 22C full post-optimization benchmark with documented before and after validation results, and a Stage 22D final runbook plus PR-ready cleanup guidance for the whole Stage 22 set.
+The repository is currently at Stage 24 - AWS Foundation Review & Deployment Plan. The local pipeline now has production-like local E2E coverage through the existing smoke-test flow plus validated sequential and opt-in concurrent runtime execution. The concurrent local runtime foundation is implemented through `--concurrent-pipeline`, and validated runs now include a sample concurrent result of `72 / 0 / 72` and a medium `10000 / 0 / 10000` pass for source rows / invalid rows / processed rows checks. AWS and Terraform foundations exist for future S3, Lambda, Step Functions, IAM, and CloudWatch work, but no real AWS deployment has been performed yet, no `terraform apply` is part of CI, and cloud E2E has not yet been proven.
 
 ## 2. Planned local architecture
 
@@ -154,6 +154,18 @@ iot-log-intelligence-pipeline/
 - Stage 20D: PR template, release checklist, and README CI badges
 - Stage 20E: final CI quality-gates runbook and PR-ready cleanup
 - Stage 21A: local E2E smoke test foundation
+- Stage 21B: controlled sample local E2E runtime
+- Stage 21C: controlled medium local E2E runtime
+- Stage 21D: controlled full local E2E runtime
+- Stage 22A: progress visibility for long-running local E2E runs
+- Stage 22B: warehouse-loader batch insert optimization
+- Stage 22C: post-optimization full benchmark validation
+- Stage 22D: final Stage 22 runbook and PR-ready cleanup
+- Stage 23: Concurrent Local E2E Runtime - completed
+- Stage 24: AWS Foundation Review & Deployment Plan - completed
+- Stage 25: AWS S3 Foundation Deployment Readiness - next
+- Stage 26: First AWS S3 Foundation Deploy - planned
+- Stage 27: AWS Orchestration Foundation / Cloud E2E Dry Run - planned
 
 ## 7. Stage 1 local setup
 
@@ -689,7 +701,7 @@ For the focused Stage 20 guide and expansion roadmap, see [docs/ci-quality-gates
 
 Stage 21D keeps the safe local smoke-test entry point at `scripts/run_local_e2e_smoke_test.py`, preserves `--run-profile-pipeline` plus the backward-compatible `--run-sample-pipeline` alias, adds controlled full-profile runtime validation behind `--allow-full-run`, and updates the focused runbook at [docs/local-e2e-smoke-test.md](docs/local-e2e-smoke-test.md).
 
-Stage 23B adds the opt-in `--concurrent-pipeline` CLI foundation for a local concurrent runtime mode, and Stage 23D1 now wires a minimal real concurrent E2E path on top of the Stage 23C `Popen`-based process-management helpers. Sequential execution remains the default behavior, while concurrent mode starts consumer first, warehouse loader second, then producer after a short warm-up and records per-process runtime details in the JSON summary.
+Stage 23 adds the opt-in `--concurrent-pipeline` CLI path for a real local concurrent runtime mode. Sequential execution remains the default behavior, while concurrent mode can run the consumer, warehouse loader, and producer concurrently after a short warm-up and records per-process runtime details in the JSON summary. The validated concurrent local E2E results currently include a sample pass of `72 / 0 / 72` and a medium `10000 / 0 / 10000` pass for source rows / invalid rows / processed rows checks.
 
 For the final Stage 23 runbook, concurrent command examples, failure-handling notes, and validation summary, see [docs/stage-23-concurrent-streaming-e2e-runtime.md](docs/stage-23-concurrent-streaming-e2e-runtime.md).
 
@@ -1210,48 +1222,27 @@ Do not commit real credentials, production secrets, or sensitive data. Use envir
 
 ## 41. Current stage
 
-Stage 22D includes everything from Stage 22C plus:
+Stage 24 - AWS Foundation Review & Deployment Plan includes everything from Stage 23 plus:
 
-- a final Stage 22 runbook at [docs/stage-22-progress-and-loader-optimization.md](docs/stage-22-progress-and-loader-optimization.md)
-- one consolidated explanation of producer, consumer, loader, JSON-summary progress visibility, optional `tqdm`, batch size controls, and full-benchmark results
-- PR-ready cleanup guidance for local JSON reports, large datasets, Terraform local state, and runtime logs
-- a manual live-output mode for local E2E runs so progress logs or `tqdm` can be observed directly in the terminal without changing the default captured/report behavior, including larger custom in-place progress bars for producer, consumer, and loader output
+- a completed AWS and Terraform foundation review documented in [docs/stage-24-aws-foundation-review.md](docs/stage-24-aws-foundation-review.md)
+- a clear statement that the project currently has AWS foundations, not a completed AWS deployment
+- confirmation that local E2E is production-like locally, while cloud E2E is not yet proven
+- review findings for the existing S3 data lake root under `infra/terraform/aws/`
+- review findings for the orchestration root under `infra/aws-orchestration/`
+- a safe deployment plan for future AWS rollout stages covering S3, IAM, Lambda, Step Functions, CloudWatch, and a first manual cloud dry run
+- explicit confirmation that no `terraform apply` was run in Stage 24
+- explicit confirmation that no AWS resources were created in Stage 24
 
-Stage 22C includes everything from Stage 22B plus:
+Stage 23 - Concurrent Local E2E Runtime includes everything from Stage 22D plus:
 
-- a validated full `100000`-row post-optimization E2E run through `scripts/run_local_e2e_smoke_test.py`
-- documented benchmark capture for available rows, row-count deltas, stage durations, progress intervals, and `WAREHOUSE_LOADER_BATCH_SIZE`
-- a full warehouse-loader before and after comparison from `758.764s` down to `15.279s` with correctness preserved at `processed_delta=100000` and `invalid_delta=0`
-- a focused Stage 22 runbook at [docs/stage-22-progress-and-loader-optimization.md](docs/stage-22-progress-and-loader-optimization.md)
-- explicit PR-ready guidance that the generated JSON summary remains local and ignored by Git
+- the opt-in `--concurrent-pipeline` mode for `scripts/run_local_e2e_smoke_test.py`
+- a real local concurrent runtime path where consumer, warehouse loader, and producer can run concurrently
+- per-process runtime capture and failure-handling support on top of the Stage 23 process-runner helpers
+- a validated sample concurrent pass with `72 / 0 / 72`
+- a validated medium `10000`-row concurrent pass with `10000 / 0 / 10000`
+- a final Stage 23 runbook at [docs/stage-23-concurrent-streaming-e2e-runtime.md](docs/stage-23-concurrent-streaming-e2e-runtime.md)
 
-Stage 22B includes everything from Stage 22A plus:
-
-- configurable warehouse-loader batch inserts through `WAREHOUSE_LOADER_BATCH_SIZE`
-- batched PostgreSQL writes and batched Kafka offset commits on the warehouse-loader normal path
-- warehouse-loader startup, flush, and summary logs that now include `batch_size` and `batches_flushed`
-- local E2E runtime propagation of warehouse-loader batch size plus JSON summary capture for that setting
-- a safer path to compare before and after warehouse-loader timing on `medium`, `full`, or `100000`-row runs without changing schemas, topics, or downstream logic
-
-Stage 22A includes everything from Stage 21D plus:
-
-- Go producer interval-based progress reporting through `PRODUCER_PROGRESS_INTERVAL`
-- Python consumer and warehouse loader interval-based progress reporting through `CONSUMER_PROGRESS_INTERVAL` and `WAREHOUSE_LOADER_PROGRESS_INTERVAL`, with optional `tqdm` when available on a real terminal and safe log fallback when it is not
-- local E2E JSON summary capture for effective per-component progress settings under `profile_pipeline_progress`
-- clearer long-run visibility for `medium`, `full`, and `100000`-row style local validation without changing topics, schemas, contracts, or anomaly-detection rules
-- an explicit split between visibility improvements in Stage 22A and future warehouse-loader runtime optimization work in Stage 22B
-
-Stage 21D includes everything from Stage 21C plus:
-
-- a local smoke-test helper at `scripts/run_local_e2e_smoke_test.py`
-- a focused local smoke-test runbook at `docs/local-e2e-smoke-test.md`
-- bounded JSON-reporting validation for repository structure, Docker Compose config, Python syntax, Terraform validation, data contracts, and optional read-only anomaly detection
-- dataset preflight reporting for resolved path, file existence, and available row counts
-- stronger full-profile preflight plus `--allow-full-run`
-- stage-duration reporting in the JSON summary for key runtime steps
-- an optional controlled sample, medium, or full runtime E2E mode with isolated Kafka topics, bounded producer/consumer/loader limits, and PostgreSQL row-count verification
-
-Stage 21C, Stage 21B, Stage 21A, Stage 20E, Stage 20D, Stage 20C, Stage 20B, Stage 20A, Stage 19E, Stage 19D, Stage 19C, Stage 19B, Stage 19A, and Stage 18D foundations remain in place, including:
+Stage 22D, Stage 22C, Stage 22B, Stage 22A, Stage 21D, Stage 21C, Stage 21B, Stage 21A, Stage 20E, Stage 20D, Stage 20C, Stage 20B, Stage 20A, Stage 19E, Stage 19D, Stage 19C, Stage 19B, Stage 19A, and Stage 18D foundations remain in place, including:
 
 - repository skeleton and documentation
 - local Docker Compose services for Kafka, Kafka topic initialization, and Kafka UI
